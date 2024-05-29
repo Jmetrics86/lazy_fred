@@ -1,0 +1,4 @@
+.env
+*.csv
+lazy_fred.code-workspace
+lazy_fred_poetry/
