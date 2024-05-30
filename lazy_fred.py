@@ -2,6 +2,7 @@ import logging
 import pandas as pd
 import time
 from fredapi import Fred
+
 import os
 from dotenv import load_dotenv
 
@@ -38,19 +39,43 @@ def get_and_validate_api_key():
         os.remove(".env")
         return get_and_validate_api_key()  # Recursively retry
 
-# Main script logic
-if __name__ == "__main__":
-    valid_api_key = get_and_validate_api_key()
+# # Main script logic
+# if __name__ == "__main__":
+#     valid_api_key = get_and_validate_api_key()
 
-    # Now, confidently use valid_api_key for FRED API calls
-    fred = Fred(api_key=valid_api_key)
-    # ... your FRED API calls here ... 
+#     # Now, confidently use valid_api_key for FRED API calls
+#     fred = Fred(api_key=valid_api_key)
+#     # ... your FRED API calls here ... 
 
-    # Save valid API key to .env if it wasn't there originally
-    if not os.getenv("API_KEY"):  # Double-check in case .env was deleted
+#     # Save valid API key to .env if it wasn't there originally
+#     if not os.getenv("API_KEY"):  # Double-check in case .env was deleted
+#         with open(".env", "w") as f:
+#             f.write(f"API_KEY={valid_api_key}\n")
+#         logger.info("Valid API key saved to .env for future use.")
+
+def main(api_key=None, save_api_key=True):
+    """
+    Main function for FRED API interactions.
+    
+    Args:
+        api_key (str, optional): FRED API key. If not provided, it's retrieved or validated.
+        save_api_key (bool, optional): Whether to save the API key to .env if it's missing. Defaults to True.
+    """
+
+    if not api_key:
+        api_key = get_and_validate_api_key()
+
+    fred = Fred(api_key=api_key)
+
+    # ... (your FRED API calls here)
+
+    if save_api_key and not os.getenv("API_KEY"):
         with open(".env", "w") as f:
-            f.write(f"API_KEY={valid_api_key}\n")
+            f.write(f"API_KEY={api_key}\n")
         logger.info("Valid API key saved to .env for future use.")
+
+if __name__ == "__main__":
+    main()
 
 
 # prompt: use fredapi to cycle searching through various topics on the list to create a large dataframe of all of the results, after using a for loop to create the master dataframe, remove duplicates.

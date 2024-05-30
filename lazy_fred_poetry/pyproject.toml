@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "lazy-fred-poetry"
+version = "0.1.0"
+description = "'A simplified aggegate of FRED data using fredapi package'"
+authors = ["Jmetrics86 <jsnbrwstr@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pandas = "^2.2.2"
+fredapi = "^0.5.2"
+python-dotenv = "^1.0.1"
+ruff = "^0.4.6"
+pytest = "^8.2.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -2,7 +2,6 @@
 .env
 *.csv
 lazy_fred.code-workspace
-lazy_fred_poetry/
 =======
 # Byte-compiled / optimized / DLL files
 __pycache__/
