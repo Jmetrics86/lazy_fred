@@ -13,6 +13,7 @@ fredapi = "^0.5.2"
 python-dotenv = "^1.0.1"
 ruff = "^0.4.6"
 pytest = "^8.2.1"
+hypothesis = "^6.103.0"
 
 
 [build-system]
