@@ -7,11 +7,13 @@ import os
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Now use the logger you created
+logger.debug('This is a debug message')
+logger.info('This is an info message')
+
+
 
 # Global Variable for FRED instance
 fred = Fred(api_key=os.getenv("API_KEY")) 
@@ -52,24 +54,50 @@ if __name__ == "__main__":
 
 
 
-# prompt: use fredapi to cycle searching through various topics on the list to create a large dataframe of all of the results, after using a for loop to create the master dataframe, remove duplicates.
+# # prompt: use fredapi to cycle searching through various topics on the list to create a large dataframe of all of the results, after using a for loop to create the master dataframe, remove duplicates.
 
 
 search_categories = ['Interest Rates', 'Exchange Rates', 'Monetary Data', 'Financial Indicator', 'Banking Industry', 'Business Lending', 'Foreign Exchange Intervention', 'Current Population', 'employment', 'education' , 'income' , 'Job Opening', 'Labor Turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency' ]
+master_df = []
+# df_list = []
+# for category in search_categories:
+#   search_results = fred.search(category, order_by='popularity', sort_order='desc', limit=1000)
+#   df = pd.DataFrame(search_results)
+#   df_list.append(df)
+#   print(category)
+# master_df = pd.concat(df_list)
+# master_df = master_df.drop_duplicates()
+# master_df.loc[:, 'popularity'] = master_df['popularity'].astype(int)
+# master_df.to_csv('lazy_fred_Search.csv')
 
-df_list = []
-for category in search_categories:
-  search_results = fred.search(category, order_by='popularity', sort_order='desc', limit=1000)
-  df = pd.DataFrame(search_results)
-  df_list.append(df)
-  print(category)
-master_df = pd.concat(df_list)
-master_df = master_df.drop_duplicates()
-master_df.loc[:, 'popularity'] = master_df['popularity'].astype(int)
-master_df.to_csv('lazy_fred_Search.csv')
+def get_fred_search_results(fred_client, categories):
+    """
+    Retrieves search results from FRED API for a list of categories,
+    combines them, removes duplicates, and returns the processed DataFrame.
+    """
+    df_list = []
+    for category in categories:
+        search_results = fred_client.search(category, order_by='popularity', sort_order='desc', limit=1000)
+        df_list.append(pd.DataFrame(search_results))
+        print(category)
+
+    master_df = pd.concat(df_list)
+    master_df = master_df.drop_duplicates()
+    master_df.loc[:, 'popularity'] = master_df['popularity'].astype(int)
+    return master_df
+
+# ... other parts of your code ...
+
+if __name__ == "__main__":
+    # ... (your existing code) ...
+    master_df = get_fred_search_results(fred, search_categories)
+    master_df.to_csv("lazy_fred_Search.csv")
+    searches = master_df.info()
+
+    print(searches)
 
 
-# prompt: using the master_df create a list of series ids filtered down to only series with frequency of daily and popularity above 50.
+#prompt: using the master_df create a list of series ids filtered down to only series with frequency of daily and popularity above 50.
 
 daily_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'D')]
 daily_list = daily_list['id'].tolist()
