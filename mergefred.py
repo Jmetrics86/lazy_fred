@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 
 daily_df = pd.read_csv('daily_data.csv')

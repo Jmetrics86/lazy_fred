@@ -8,11 +8,13 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-
-# Global Variable for FRED instance and the sleep to avoid tripping timeout
 fred = Fred(api_key=os.getenv("API_KEY")) 
 sleep = 0.25
+
+# Global Variable for FRED instance and the sleep to avoid tripping timeout
+def apidetails(fred, sleep):
+    print(fred+sleep)
+    
 
 def get_and_validate_api_key():
     """Retrieves API key from environment, validates, and handles errors."""
@@ -95,9 +97,11 @@ if __name__ == "__main__":
 
 #prompt: using the master_df create a list of series ids filtered down to only series with frequency of daily and popularity above 50.
 
-daily_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'D')]
-daily_list = daily_list['id'].tolist()
-print(daily_list)
+def dailyfilter():
+    filtered_df = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'D')]
+    daily_list = filtered_df['id'].tolist()
+    return daily_list
+
 
 
 # prompt: using the master_df create a list of series ids filtered down to only series with frequency of monthly and popularity above 50.
