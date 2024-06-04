@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 fred = Fred(api_key=os.getenv("API_KEY")) 
-sleep = 0.25
+sleep = 0.1
 
 # Global Variable for FRED instance and the sleep to avoid tripping timeout
 def apidetails(fred, sleep):
@@ -56,6 +56,9 @@ if __name__ == "__main__":
 
 
 search_categories = ['Interest Rates', 'Exchange Rates', 'Monetary Data', 'Financial Indicator', 'Banking Industry', 'Business Lending', 'Foreign Exchange Intervention', 'Current Population', 'employment', 'education' , 'income' , 'Job Opening', 'Labor Turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency' ]
+#search_categories = ['Interest Rates','Exchange Rates']
+
+
 master_df = []
 # df_list = []
 # for category in search_categories:
@@ -105,25 +108,23 @@ def dailyfilter():
 
 
 # prompt: using the master_df create a list of series ids filtered down to only series with frequency of monthly and popularity above 50.
-
-monthly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'M')]
-monthly_list = monthly_list['id'].tolist()
-print(monthly_list)
+def monthlyfilter():
+    monthly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'M')]
+    monthly_list = monthly_list['id'].tolist()
+    return monthly_list
 
 # prompt: using the master_df create a list of series ids filtered down to only series with frequency of weekly and popularity above 50.
-
-weekly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'W')]
-weekly_list = weekly_list['id'].tolist()
-print(weekly_list)
-
-
+def weeklyfilter():
+    weekly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'W')]
+    weekly_list = weekly_list['id'].tolist()
+    return weekly_list
 
 # Create an empty DataFrame to store the merged data
 merged_data = pd.DataFrame()
 data = pd.DataFrame()
 
 # Loop through each series and merge it into the DataFrame
-for series_id in daily_list:
+for series_id in dailyfilter():
     data = pd.DataFrame(fred.get_series(series_id))
     data['series'] = series_id
     merged_data = pd.concat([merged_data, data], axis=0)
@@ -146,7 +147,7 @@ monthly_merged_data = pd.DataFrame()
 data = pd.DataFrame()
 
 # Loop through each series and merge it into the DataFrame
-for series_id in monthly_list:
+for series_id in monthlyfilter():
     data = pd.DataFrame(fred.get_series(series_id))
     data['series'] = series_id
     monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)
@@ -169,7 +170,7 @@ monthly_merged_data = pd.DataFrame()
 data = pd.DataFrame()
 
 # Loop through each series and merge it into the DataFrame
-for series_id in weekly_list:
+for series_id in weeklyfilter():
     data = pd.DataFrame(fred.get_series(series_id))
     data['series'] = series_id
     monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)
@@ -185,3 +186,4 @@ monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'v
 print(monthly_merged_data)
 print(monthly_merged_data.info())
 monthly_merged_data.to_csv('weekly_data.csv')
+print("complete!")
