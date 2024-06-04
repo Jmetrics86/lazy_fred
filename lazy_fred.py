@@ -2,21 +2,17 @@ import logging
 import pandas as pd
 import time
 from fredapi import Fred
-
 import os
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Now use the logger you created
-logger.debug('This is a debug message')
-logger.info('This is an info message')
 
 
-
-# Global Variable for FRED instance
+# Global Variable for FRED instance and the sleep to avoid tripping timeout
 fred = Fred(api_key=os.getenv("API_KEY")) 
+sleep = 0.25
 
 def get_and_validate_api_key():
     """Retrieves API key from environment, validates, and handles errors."""
@@ -27,7 +23,7 @@ def get_and_validate_api_key():
         api_key = input("API_KEY not found in .env. Please enter your API key: ")
 
     try:
-        fred = Fred(api_key)
+        #fred = Fred(api_key)
         fred.search('category', order_by='popularity', sort_order='desc', limit=10)
         logger.info("API key is valid!")
         return api_key
@@ -42,7 +38,7 @@ if __name__ == "__main__":
     valid_api_key = get_and_validate_api_key()
 
     # Now, confidently use valid_api_key for FRED API calls
-    fred = Fred(api_key=valid_api_key)
+    #fred = Fred(api_key=valid_api_key)
     # ... your FRED API calls here ... 
 
     # Save valid API key to .env if it wasn't there originally
@@ -128,6 +124,7 @@ for series_id in daily_list:
     data['series'] = series_id
     merged_data = pd.concat([merged_data, data], axis=0)
     print(series_id)
+    time.sleep(sleep)
 
 
 # Print the merged DataFrame
@@ -150,7 +147,7 @@ for series_id in monthly_list:
     data['series'] = series_id
     monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)
     print(series_id)
-    time.sleep(0.5)
+    time.sleep(sleep)
 
 
 # Print the merged DataFrame
@@ -173,7 +170,7 @@ for series_id in weekly_list:
     data['series'] = series_id
     monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)
     print(series_id)
-    time.sleep(0.5)
+    time.sleep(sleep)
 
 
 # Print the merged DataFrame
