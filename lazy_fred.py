@@ -8,182 +8,209 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+#set some global varibles here
 fred = Fred(api_key=os.getenv("API_KEY")) 
 sleep = 0.1
+searchlimit = 5 #1000 is max
 
-# Global Variable for FRED instance and the sleep to avoid tripping timeout
-def apidetails(fred, sleep):
-    print(fred+sleep)
-    
+class AccessFred:
+    # Global Variable for FRED instance and the sleep to avoid tripping timeout
+        
+    def get_and_validate_api_key(self):
+        """Retrieves API key from environment, validates, and handles errors."""
+        load_dotenv(override=True)  # Always load .env to get potential updates
+        api_key = os.getenv("API_KEY")
 
-def get_and_validate_api_key():
-    """Retrieves API key from environment, validates, and handles errors."""
-    load_dotenv(override=True)  # Always load .env to get potential updates
-    api_key = os.getenv("API_KEY")
+        if not api_key:
+            api_key = input("API_KEY not found in .env. Please enter your API key: ")
 
-    if not api_key:
-        api_key = input("API_KEY not found in .env. Please enter your API key: ")
-
-    try:
-        #fred = Fred(api_key)
-        fred.search('category', order_by='popularity', sort_order='desc', limit=10)
-        logger.info("API key is valid!")
-        return api_key
-    except Exception :
-        logger.error("Invalid API key. Please try again.")
-        # Clear invalid key from .env
-        os.remove(".env")
-        return get_and_validate_api_key()  # Recursively retry
-
-# Main script logic
-if __name__ == "__main__":
-    valid_api_key = get_and_validate_api_key()
-
-    # Now, confidently use valid_api_key for FRED API calls
-    #fred = Fred(api_key=valid_api_key)
-    # ... your FRED API calls here ... 
-
-    # Save valid API key to .env if it wasn't there originally
-    if not os.getenv("API_KEY"):  # Double-check in case .env was deleted
-        with open(".env", "w") as f:
-            f.write(f"API_KEY={valid_api_key}\n")
-        logger.info("Valid API key saved to .env for future use.")
+        try:
+            #fred = Fred(api_key)
+            fred.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
+            logger.info("API key is valid!")
+            return api_key
+        except Exception :
+            logger.error("Invalid API key. Please try again.")
+            # Clear invalid key from .env
+            os.remove(".env")
+            return AccessFred.get_and_validate_api_key()  # Recursively retry
 
 
 
 
-# # prompt: use fredapi to cycle searching through various topics on the list to create a large dataframe of all of the results, after using a for loop to create the master dataframe, remove duplicates.
+# prompt: use fredapi to cycle searching through various topics on the list to create a large dataframe of all of the results, after using a for loop to create the master dataframe, remove duplicates.
+
+class collect_categories:
+
+        
 
 
-search_categories = ['Interest Rates', 'Exchange Rates', 'Monetary Data', 'Financial Indicator', 'Banking Industry', 'Business Lending', 'Foreign Exchange Intervention', 'Current Population', 'employment', 'education' , 'income' , 'Job Opening', 'Labor Turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency' ]
-#search_categories = ['Interest Rates','Exchange Rates']
+    def get_fred_search_results(fred):
+        """
+        Retrieves search results from FRED API for a list of categories,
+        combines them, removes duplicates, and returns the processed DataFrame.
+        """
+        fred = Fred(api_key=os.getenv("API_KEY")) 
+        #search_categories = ['Interest Rates', 'Exchange Rates', 'Monetary Data', 'Financial Indicator', 'Banking Industry', 'Business Lending', 'Foreign Exchange Intervention', 'Current Population', 'employment', 'education' , 'income' , 'Job Opening', 'Labor Turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency' ]
+        search_categories = ['Interest Rates','Exchange Rates']
+        
+        df_list = []
+        for category in search_categories:
+            search_results = fred.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
+            df_list.append(pd.DataFrame(search_results))
+        
+        master_df = pd.concat(df_list)
+        master_df = master_df.drop_duplicates()
+        master_df.loc[:, 'popularity'] = master_df['popularity'].astype(int)
+        return master_df
 
+    def export_master(self):
+        master_df = self.get_fred_search_results()
+        master_df.to_csv("lazy_fred_Search.csv")
 
-master_df = []
-# df_list = []
-# for category in search_categories:
-#   search_results = fred.search(category, order_by='popularity', sort_order='desc', limit=1000)
-#   df = pd.DataFrame(search_results)
-#   df_list.append(df)
-#   print(category)
-# master_df = pd.concat(df_list)
-# master_df = master_df.drop_duplicates()
-# master_df.loc[:, 'popularity'] = master_df['popularity'].astype(int)
-# master_df.to_csv('lazy_fred_Search.csv')
-
-def get_fred_search_results(fred_client, categories):
-    """
-    Retrieves search results from FRED API for a list of categories,
-    combines them, removes duplicates, and returns the processed DataFrame.
-    """
-    df_list = []
-    for category in categories:
-        search_results = fred_client.search(category, order_by='popularity', sort_order='desc', limit=1000)
-        df_list.append(pd.DataFrame(search_results))
-        print(category)
-
-    master_df = pd.concat(df_list)
-    master_df = master_df.drop_duplicates()
-    master_df.loc[:, 'popularity'] = master_df['popularity'].astype(int)
-    return master_df
-
-# ... other parts of your code ...
-
-if __name__ == "__main__":
-    # ... (your existing code) ...
-    master_df = get_fred_search_results(fred, search_categories)
-    master_df.to_csv("lazy_fred_Search.csv")
-    searches = master_df.info()
-
-    print(searches)
 
 
 #prompt: using the master_df create a list of series ids filtered down to only series with frequency of daily and popularity above 50.
+class daily_export:
+    def __init__(self, fred):
+        self.fred = fred
 
-def dailyfilter():
-    filtered_df = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'D')]
-    daily_list = filtered_df['id'].tolist()
-    return daily_list
+    def dailyfilter(self):
+        master_df = pd.read_csv('lazy_fred_Search.csv')
+        filtered_df = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'D')]
+        daily_list = filtered_df['id'].tolist()
+        return daily_list
 
+    # Loop through each series and merge it into the DataFrame
+    def daily_series_collector(self):
+        # Create an empty DataFrame to store the merged data
+        merged_data = pd.DataFrame()
+        
+        for series_id in daily_export.dailyfilter(self):
+            data = pd.DataFrame(fred.get_series(series_id))
+            data['series'] = series_id
+            #merged_data = pd.concat([merged_data, data], axis=0)
+            pd.concat([merged_data, data], axis=0)
+            print(series_id)
+            time.sleep(sleep)
 
-
-# prompt: using the master_df create a list of series ids filtered down to only series with frequency of monthly and popularity above 50.
-def monthlyfilter():
-    monthly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'M')]
-    monthly_list = monthly_list['id'].tolist()
-    return monthly_list
-
-# prompt: using the master_df create a list of series ids filtered down to only series with frequency of weekly and popularity above 50.
-def weeklyfilter():
-    weekly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'W')]
-    weekly_list = weekly_list['id'].tolist()
-    return weekly_list
-
-# Create an empty DataFrame to store the merged data
-merged_data = pd.DataFrame()
-data = pd.DataFrame()
-
-# Loop through each series and merge it into the DataFrame
-for series_id in dailyfilter():
-    data = pd.DataFrame(fred.get_series(series_id))
-    data['series'] = series_id
-    merged_data = pd.concat([merged_data, data], axis=0)
-    print(series_id)
-    time.sleep(sleep)
+            # Print the merged DataFrame
+        merged_data = merged_data.reset_index()
+        merged_data = merged_data.rename(columns={'index': 'date', 0: 'value'})
+        merged_data.to_csv('daily_data.csv')
+        print("daily series generated")
 
 
-# Print the merged DataFrame
-merged_data = merged_data.reset_index()
-merged_data = merged_data.rename(columns={'index': 'date', 0: 'value'})
+class monthly_export:
+    def __init__(self, fred):
+        self.fred = fred
+
+    # prompt: using the master_df create a list of series ids filtered down to only series with frequency of monthly and popularity above 50.
+    def monthlyfilter(self):
+        master_df = pd.read_csv('lazy_fred_Search.csv')
+        monthly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'M')]
+        monthly_list = monthly_list['id'].tolist()
+        return monthly_list
+
+    # Loop through each series and merge it into the DataFrame
+    def monthly_series_collector(self):
+        
+        # Create an empty DataFrame to store the merged data
+        monthly_merged_data = pd.DataFrame()
+        data = pd.DataFrame()
+
+        for series_id in monthly_export.monthlyfilter(self):
+            data = pd.DataFrame(fred.get_series(series_id))
+            data['series'] = series_id
+            pd.concat([monthly_merged_data, data], axis=0)
+            print(series_id)
+            time.sleep(sleep)
+
+        # Print the merged DataFrame
+        monthly_merged_data = monthly_merged_data.reset_index()
+        monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
+        monthly_merged_data.to_csv('monthly_data.csv')
+        print("monthly series completed!")
 
 
-print(merged_data)
-print(merged_data.info())
-merged_data.to_csv('daily_data.csv')
 
 
-# Create an empty DataFrame to store the merged data
-monthly_merged_data = pd.DataFrame()
-data = pd.DataFrame()
 
-# Loop through each series and merge it into the DataFrame
-for series_id in monthlyfilter():
-    data = pd.DataFrame(fred.get_series(series_id))
-    data['series'] = series_id
-    monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)
-    print(series_id)
-    time.sleep(sleep)
+class weekly_export:
 
+    def __init__(self, fred):
+        self.fred = fred
 
-# Print the merged DataFrame
-monthly_merged_data = monthly_merged_data.reset_index()
-monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
+    # prompt: using the master_df create a list of series ids filtered down to only series with frequency of weekly and popularity above 50.
+    def weeklyfilter(self):
+        master_df = pd.read_csv('lazy_fred_Search.csv')
+        weekly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'W')]
+        weekly_list = weekly_list['id'].tolist()
+        return weekly_list
 
+    # Loop through each series and merge it into the DataFrame
+    def weekly_series_collector(self):
 
-print(monthly_merged_data)
-print(monthly_merged_data.info())
-monthly_merged_data.to_csv('monthly_data.csv')
+        # Create an empty DataFrame to store the merged data
+        weekly_merged_data = pd.DataFrame()
+        data = pd.DataFrame()
 
 
-# Create an empty DataFrame to store the merged data
-monthly_merged_data = pd.DataFrame()
-data = pd.DataFrame()
+        for series_id in weekly_export.weeklyfilter(self):
+            data = pd.DataFrame(fred.get_series(series_id))
+            data['series'] = series_id
+            pd.concat([weekly_merged_data, data], axis=0)
+            print(series_id)
+            time.sleep(sleep)
 
-# Loop through each series and merge it into the DataFrame
-for series_id in weeklyfilter():
-    data = pd.DataFrame(fred.get_series(series_id))
-    data['series'] = series_id
-    monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)
-    print(series_id)
-    time.sleep(sleep)
-
-
-# Print the merged DataFrame
-monthly_merged_data = monthly_merged_data.reset_index()
-monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
+        # Print the merged DataFrame
+        weekly_merged_data = weekly_merged_data.reset_index()
+        weekly_merged_data = weekly_merged_data.rename(columns={'index': 'date', 0: 'value'})
+        weekly_merged_data.to_csv('weekly_data.csv')
+        print("weekly series completed!")
+        
 
 
-print(monthly_merged_data)
-print(monthly_merged_data.info())
-monthly_merged_data.to_csv('weekly_data.csv')
-print("complete!")
+
+
+
+#Collecting Execution Code into main method
+def main():
+    print("checking access!")
+    AccessFred1 = AccessFred()
+    AccessFred1.get_and_validate_api_key()
+    print("collecting categories!")
+    #Aggregating categorical data and exporting
+    GrabCategories1 = collect_categories()
+    GrabCategories1.get_fred_search_results()
+    GrabCategories1.export_master()
+
+    print("collecting daily data!")
+    #Exporting Daily Data
+    daily_export1 = daily_export(fred)
+    daily_export1.dailyfilter()
+    daily_export1.daily_series_collector()
+
+    print("collecting monthly data!")
+    #exporting Monthly Data
+    monthly_export1 = monthly_export(fred)
+    monthly_export1.monthlyfilter()
+    monthly_export1.monthly_series_collector()
+    print("collecting weekly data!")
+    #exporting Weekly Data
+    weekly_export1 = weekly_export(fred)
+    weekly_export1.weeklyfilter()
+    weekly_export1.weekly_series_collector()
+    print("complete!")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
