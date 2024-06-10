@@ -12,6 +12,10 @@ logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s
 fred = Fred(api_key=os.getenv("API_KEY")) 
 sleep = 0.1
 searchlimit = 1000 #1000 is max
+search_categories = ['Interest Rates','Exchange Rates']
+#search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
+
+
 
 class AccessFred:
     # Global Variable for FRED instance and the sleep to avoid tripping timeout
@@ -45,15 +49,12 @@ class collect_categories:
         
 
 
-    def get_fred_search_results(fred):
+    def get_fred_search_results(self, fred):
         """
         Retrieves search results from FRED API for a list of categories,
         combines them, removes duplicates, and returns the processed DataFrame.
         """
         fred = Fred(api_key=os.getenv("API_KEY")) 
-        #search_categories = ['Interest Rates', 'Exchange Rates', 'Monetary Data', 'Financial Indicator', 'Banking Industry', 'Business Lending', 'Foreign Exchange Intervention', 'Current Population', 'employment', 'education' , 'income' , 'Job Opening', 'Labor Turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency' ]
-        #search_categories = ['Interest Rates','Exchange Rates']
-        search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
 
         df_list = []
         for category in search_categories:
@@ -289,7 +290,7 @@ def main():
     print("collecting categories!")
     #Aggregating categorical data and exporting
     GrabCategories1 = collect_categories()
-    GrabCategories1.get_fred_search_results()
+    GrabCategories1.get_fred_search_results(fred, search_categories)
     GrabCategories1.export_master()
 
     print("collecting daily data!")
