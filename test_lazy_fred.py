@@ -28,7 +28,7 @@ def test_get_fred_search_results():
     # fred_mock = ...  (create your mock fred instance)
 
     collect = collect_categories()
-    results = collect.get_fred_search_results(fred) 
+    results = collect.get_fred_search_results() 
     
     # Check if output is a DataFrame
     assert isinstance(results, pd.DataFrame)

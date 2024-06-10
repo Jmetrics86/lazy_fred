@@ -10,7 +10,7 @@ logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s
 
 #set some global varibles here
 fred = Fred(api_key=os.getenv("API_KEY")) 
-sleep = 0.1
+sleep = 0.2
 searchlimit = 1000 #1000 is max
 search_categories = ['Interest Rates','Exchange Rates']
 #search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
@@ -49,18 +49,32 @@ class collect_categories:
         
 
 
-    def get_fred_search_results(self, fred):
+    def get_fred_search_results(self):
         """
         Retrieves search results from FRED API for a list of categories,
         combines them, removes duplicates, and returns the processed DataFrame.
         """
         fred = Fred(api_key=os.getenv("API_KEY")) 
 
+        max_retries = 5  # Maximum number of retry attempts
+
         df_list = []
         for category in search_categories:
-            print(category)
-            search_results = fred.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
-            df_list.append(pd.DataFrame(search_results))
+            retries = 0
+            while retries < max_retries:
+                try:
+                    print(category)
+                    search_results = fred.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
+                    df_list.append(pd.DataFrame(search_results))
+                    time.sleep(sleep)  # Rate limiting
+                    break  # Exit the retry loop if successful
+                except Exception as e:  # Catch any exception
+                    retries += 1
+                    print(f"Error retrieving data for {category}: {e}. Retrying... ({retries}/{max_retries})")
+                    time.sleep(sleep**retries)  # Increasing wait time on each retry
+            else:
+                print(f"Failed to retrieve data for {category} after {max_retries} attempts.")
+                
         
         master_df = pd.concat(df_list)
         master_df = master_df.drop_duplicates()
@@ -84,24 +98,6 @@ class daily_export:
         daily_list = filtered_df['id'].tolist()
         return daily_list
 
-    # # Loop through each series and merge it into the DataFrame
-    # def daily_series_collector(self):
-    #     # Create an empty DataFrame to store the merged data
-    #     merged_data = pd.DataFrame()
-        
-    #     for series_id in daily_export.dailyfilter(self):
-    #         data = pd.DataFrame(fred.get_series(series_id))
-    #         data['series'] = series_id
-    #         #merged_data = pd.concat([merged_data, data], axis=0)
-    #         pd.concat([merged_data, data], axis=0)
-    #         print(series_id)
-    #         time.sleep(sleep)
-
-    #         # Print the merged DataFrame
-    #     merged_data = merged_data.reset_index()
-    #     merged_data = merged_data.rename(columns={'index': 'date', 0: 'value'})
-    #     merged_data.to_csv('daily_data.csv')
-    #     print("daily series generated")
 
 
 
@@ -152,25 +148,6 @@ class monthly_export:
         monthly_list = monthly_list['id'].tolist()
         return monthly_list
 
-#     # Loop through each series and merge it into the DataFrame
-#     def monthly_series_collector(self):
-        
-#         # Create an empty DataFrame to store the merged data
-#         monthly_merged_data = pd.DataFrame()
-#         data = pd.DataFrame()
-
-#         for series_id in monthly_export.monthlyfilter(self):
-#             data = pd.DataFrame(fred.get_series(series_id))
-#             data['series'] = series_id
-#             pd.concat([monthly_merged_data, data], axis=0)
-#             print(series_id)
-#             time.sleep(sleep)
-
-#         # Print the merged DataFrame
-#         monthly_merged_data = monthly_merged_data.reset_index()
-#         monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
-#         monthly_merged_data.to_csv('monthly_data.csv')
-#         print("monthly series completed!")
 
 
     def monthly_series_collector(self):
@@ -223,26 +200,6 @@ class weekly_export:
         weekly_list = weekly_list['id'].tolist()
         return weekly_list
 
-    # # Loop through each series and merge it into the DataFrame
-    # def weekly_series_collector(self):
-
-    #     # Create an empty DataFrame to store the merged data
-    #     weekly_merged_data = pd.DataFrame()
-    #     data = pd.DataFrame()
-
-
-    #     for series_id in weekly_export.weeklyfilter(self):
-    #         data = pd.DataFrame(fred.get_series(series_id))
-    #         data['series'] = series_id
-    #         pd.concat([weekly_merged_data, data], axis=0)
-    #         print(series_id)
-    #         time.sleep(sleep)
-
-    #     # Print the merged DataFrame
-    #     weekly_merged_data = weekly_merged_data.reset_index()
-    #     weekly_merged_data = weekly_merged_data.rename(columns={'index': 'date', 0: 'value'})
-    #     weekly_merged_data.to_csv('weekly_data.csv')
-    #     print("weekly series completed!")
         
     def weekly_series_collector(self):
         weekly_merged_data = pd.DataFrame()
@@ -290,7 +247,7 @@ def main():
     print("collecting categories!")
     #Aggregating categorical data and exporting
     GrabCategories1 = collect_categories()
-    GrabCategories1.get_fred_search_results(fred, search_categories)
+    GrabCategories1.get_fred_search_results()
     GrabCategories1.export_master()
 
     print("collecting daily data!")
