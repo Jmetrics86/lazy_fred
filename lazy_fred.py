@@ -11,7 +11,7 @@ logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s
 #set some global varibles here
 fred = Fred(api_key=os.getenv("API_KEY")) 
 sleep = 0.1
-searchlimit = 5 #1000 is max
+searchlimit = 1000 #1000 is max
 
 class AccessFred:
     # Global Variable for FRED instance and the sleep to avoid tripping timeout
@@ -52,10 +52,12 @@ class collect_categories:
         """
         fred = Fred(api_key=os.getenv("API_KEY")) 
         #search_categories = ['Interest Rates', 'Exchange Rates', 'Monetary Data', 'Financial Indicator', 'Banking Industry', 'Business Lending', 'Foreign Exchange Intervention', 'Current Population', 'employment', 'education' , 'income' , 'Job Opening', 'Labor Turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency' ]
-        search_categories = ['Interest Rates','Exchange Rates']
-        
+        #search_categories = ['Interest Rates','Exchange Rates']
+        search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
+
         df_list = []
         for category in search_categories:
+            print(category)
             search_results = fred.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
             df_list.append(pd.DataFrame(search_results))
         
@@ -81,20 +83,57 @@ class daily_export:
         daily_list = filtered_df['id'].tolist()
         return daily_list
 
-    # Loop through each series and merge it into the DataFrame
-    def daily_series_collector(self):
-        # Create an empty DataFrame to store the merged data
-        merged_data = pd.DataFrame()
+    # # Loop through each series and merge it into the DataFrame
+    # def daily_series_collector(self):
+    #     # Create an empty DataFrame to store the merged data
+    #     merged_data = pd.DataFrame()
         
-        for series_id in daily_export.dailyfilter(self):
-            data = pd.DataFrame(fred.get_series(series_id))
-            data['series'] = series_id
-            #merged_data = pd.concat([merged_data, data], axis=0)
-            pd.concat([merged_data, data], axis=0)
-            print(series_id)
-            time.sleep(sleep)
+    #     for series_id in daily_export.dailyfilter(self):
+    #         data = pd.DataFrame(fred.get_series(series_id))
+    #         data['series'] = series_id
+    #         #merged_data = pd.concat([merged_data, data], axis=0)
+    #         pd.concat([merged_data, data], axis=0)
+    #         print(series_id)
+    #         time.sleep(sleep)
 
-            # Print the merged DataFrame
+    #         # Print the merged DataFrame
+    #     merged_data = merged_data.reset_index()
+    #     merged_data = merged_data.rename(columns={'index': 'date', 0: 'value'})
+    #     merged_data.to_csv('daily_data.csv')
+    #     print("daily series generated")
+
+
+
+    def daily_series_collector(self):
+        merged_data = pd.DataFrame()
+        max_retries = 5  # Maximum number of retry attempts
+        retry_count = 0  # Current retry count
+        initial_wait_time = 0.2  # Initial wait time in seconds
+
+        for series_id in daily_export.dailyfilter(self):
+            while retry_count < max_retries:
+                try:
+                    data = pd.DataFrame(fred.get_series(series_id))
+                    data['series'] = series_id
+                    merged_data = pd.concat([merged_data, data], axis=0)
+                    print(series_id)
+                    time.sleep(sleep)
+                    break  # Break out of the retry loop if successful
+
+                except Exception as e:
+                    if e.args[0][0] == 429:
+                        wait_time = initial_wait_time * 2 ** retry_count
+                        print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                        retry_count += 1
+                    else:
+                        logger.error(f"Error fetching series {series_id}: {e}")
+                        break
+            else:
+                logger.error(f"Max retries reached for series {series_id}. Skipping.")
+                retry_count = 0 # Reset retry count for the next series
+            
+
         merged_data = merged_data.reset_index()
         merged_data = merged_data.rename(columns={'index': 'date', 0: 'value'})
         merged_data.to_csv('daily_data.csv')
@@ -112,26 +151,61 @@ class monthly_export:
         monthly_list = monthly_list['id'].tolist()
         return monthly_list
 
-    # Loop through each series and merge it into the DataFrame
-    def monthly_series_collector(self):
+#     # Loop through each series and merge it into the DataFrame
+#     def monthly_series_collector(self):
         
-        # Create an empty DataFrame to store the merged data
+#         # Create an empty DataFrame to store the merged data
+#         monthly_merged_data = pd.DataFrame()
+#         data = pd.DataFrame()
+
+#         for series_id in monthly_export.monthlyfilter(self):
+#             data = pd.DataFrame(fred.get_series(series_id))
+#             data['series'] = series_id
+#             pd.concat([monthly_merged_data, data], axis=0)
+#             print(series_id)
+#             time.sleep(sleep)
+
+#         # Print the merged DataFrame
+#         monthly_merged_data = monthly_merged_data.reset_index()
+#         monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
+#         monthly_merged_data.to_csv('monthly_data.csv')
+#         print("monthly series completed!")
+
+
+    def monthly_series_collector(self):
         monthly_merged_data = pd.DataFrame()
-        data = pd.DataFrame()
+        max_retries = 5  # Maximum number of retry attempts
+        retry_count = 0  # Current retry count
+        initial_wait_time = 0.2  # Initial wait time in seconds
 
         for series_id in monthly_export.monthlyfilter(self):
-            data = pd.DataFrame(fred.get_series(series_id))
-            data['series'] = series_id
-            pd.concat([monthly_merged_data, data], axis=0)
-            print(series_id)
-            time.sleep(sleep)
+            while retry_count < max_retries:
+                try:
+                    data = pd.DataFrame(fred.get_series(series_id))
+                    data['series'] = series_id
+                    monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)  # Update merged data
+                    print(series_id)
+                    time.sleep(sleep)
+                    retry_count = 0 # Reset retry count for the next series
+                    break  # Break out of the retry loop if successful
 
-        # Print the merged DataFrame
+                except Exception as e:
+                    if e.args[0][0] == 429:
+                        wait_time = initial_wait_time * 2 ** retry_count
+                        print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                        retry_count += 1
+                    else:
+                        logger.error(f"Error fetching series {series_id}: {e}")
+                        break
+            else:
+                logger.error(f"Max retries reached for series {series_id}. Skipping.")
+
+
         monthly_merged_data = monthly_merged_data.reset_index()
         monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
         monthly_merged_data.to_csv('monthly_data.csv')
         print("monthly series completed!")
-
 
 
 
@@ -148,27 +222,60 @@ class weekly_export:
         weekly_list = weekly_list['id'].tolist()
         return weekly_list
 
-    # Loop through each series and merge it into the DataFrame
+    # # Loop through each series and merge it into the DataFrame
+    # def weekly_series_collector(self):
+
+    #     # Create an empty DataFrame to store the merged data
+    #     weekly_merged_data = pd.DataFrame()
+    #     data = pd.DataFrame()
+
+
+    #     for series_id in weekly_export.weeklyfilter(self):
+    #         data = pd.DataFrame(fred.get_series(series_id))
+    #         data['series'] = series_id
+    #         pd.concat([weekly_merged_data, data], axis=0)
+    #         print(series_id)
+    #         time.sleep(sleep)
+
+    #     # Print the merged DataFrame
+    #     weekly_merged_data = weekly_merged_data.reset_index()
+    #     weekly_merged_data = weekly_merged_data.rename(columns={'index': 'date', 0: 'value'})
+    #     weekly_merged_data.to_csv('weekly_data.csv')
+    #     print("weekly series completed!")
+        
     def weekly_series_collector(self):
-
-        # Create an empty DataFrame to store the merged data
         weekly_merged_data = pd.DataFrame()
-        data = pd.DataFrame()
-
+        max_retries = 5  # Maximum number of retry attempts
+        retry_count = 0  # Current retry count
+        initial_wait_time = 0.2  # Initial wait time in seconds
 
         for series_id in weekly_export.weeklyfilter(self):
-            data = pd.DataFrame(fred.get_series(series_id))
-            data['series'] = series_id
-            pd.concat([weekly_merged_data, data], axis=0)
-            print(series_id)
-            time.sleep(sleep)
+            while retry_count < max_retries:
+                try:
+                    data = pd.DataFrame(fred.get_series(series_id))
+                    data['series'] = series_id
+                    weekly_merged_data = pd.concat([weekly_merged_data, data], axis=0)  # Update merged data
+                    print(series_id)
+                    time.sleep(sleep)
+                    retry_count = 0 # Reset retry count for the next series
+                    break  # Break out of the retry loop if successful
 
-        # Print the merged DataFrame
+                except Exception as e:
+                    if e.args[0][0] == 429:
+                        wait_time = initial_wait_time * 2 ** retry_count
+                        print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                        retry_count += 1
+                    else:
+                        logger.error(f"Error fetching series {series_id}: {e}")
+                        break
+            else: # The else statement is executed if the while loop completes normally, meaning the max number of retries was reached
+                logger.error(f"Max retries reached for series {series_id}. Skipping.")
+
         weekly_merged_data = weekly_merged_data.reset_index()
         weekly_merged_data = weekly_merged_data.rename(columns={'index': 'date', 0: 'value'})
         weekly_merged_data.to_csv('weekly_data.csv')
         print("weekly series completed!")
-        
 
 
 
