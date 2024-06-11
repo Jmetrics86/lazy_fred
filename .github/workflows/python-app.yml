@@ -7,9 +7,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Set up Python
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
+    - name: Check out repository
+      uses: actions/checkout@v3
+    - name: Set up python
+      uses: actions/setup-python@v4
       with:
         python-version: '3.12'  # Replace '3.x' with your Python version
 
