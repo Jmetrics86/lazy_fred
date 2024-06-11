@@ -17,7 +17,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install fredapi pytest pandas dotenv
+        pip install fredapi pytest pandas python-dotenv
 
     - name: Set environment variable
       run: |
