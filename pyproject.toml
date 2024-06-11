@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "lazy-fred-poetry"
+name = "lazy-fred"
 version = "0.1.0"
 description = "'A simplified aggegate of FRED data using fredapi package'"
 authors = ["Jmetrics86 <jsnbrwstr@gmail.com>"]
