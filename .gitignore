@@ -1,9 +1,8 @@
-<<<<<<< HEAD
 .env
 *.csv
 lazy_fred.code-workspace
 app.log
-=======
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -31,6 +30,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.whl
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -164,4 +164,3 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
->>>>>>> fcf8410153fbc25da4c1b9ef47f7ea144244dec2

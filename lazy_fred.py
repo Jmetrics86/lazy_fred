@@ -3,7 +3,7 @@ import pandas as pd
 import time
 from fredapi import Fred
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,24 +20,29 @@ search_categories = ['Interest Rates','Exchange Rates']
 class AccessFred:
     # Global Variable for FRED instance and the sleep to avoid tripping timeout
         
+
     def get_and_validate_api_key(self):
-        """Retrieves API key from environment, validates, and handles errors."""
-        load_dotenv(override=True)  # Always load .env to get potential updates
+        """Retrieves API key, stores in .env if valid, and handles errors."""
+
+        load_dotenv()  # Load existing variables (if any)
         api_key = os.getenv("API_KEY")
 
-        if not api_key:
+        while not api_key:  # Keep asking until a valid key is provided
             api_key = input("API_KEY not found in .env. Please enter your API key: ")
 
-        try:
-            #fred = Fred(api_key)
-            fred.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
-            logger.info("API key is valid!")
-            return api_key
-        except Exception :
-            logger.error("Invalid API key. Please try again.")
-            # Clear invalid key from .env
-            os.remove(".env")
-            return AccessFred.get_and_validate_api_key()  # Recursively retry
+            try:
+                #fred = Fred(api_key)
+                fred.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
+                logger.info("API key is valid!")
+
+                # Store valid API key in .env
+                set_key(".env", "API_KEY", api_key) 
+                
+                return api_key
+            except Exception:
+                logger.error("Invalid API key. Please try again.")
+
+
 
 
 
