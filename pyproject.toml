@@ -1,13 +1,13 @@
 [tool.poetry]
-name = "lazy-fred"
-version = "0.1.0"
+name = "lazy_fred"
+version = "0.1.1"
 description = "'A simplified aggegate of FRED data using fredapi package'"
 authors = ["Jmetrics86 <jsnbrwstr@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.10"
 pandas = "^2.2.2"
 fredapi = "^0.5.2"
 python-dotenv = "^1.0.1"
