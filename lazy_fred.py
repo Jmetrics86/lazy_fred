@@ -5,27 +5,38 @@ from fredapi import Fred
 import os
 from dotenv import load_dotenv, set_key
 
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 #set some global varibles here
-fred = Fred(api_key=os.getenv("API_KEY")) 
 sleep = 0.2
-searchlimit = 1000 #1000 is max
+searchlimit = 10 #1000 is max
 search_categories = ['Interest Rates','Exchange Rates']
 #search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
 
 
 
 class AccessFred:
-    # Global Variable for FRED instance and the sleep to avoid tripping timeout
-        
+    
+    
+    def set_api_key_in_environment(self):
+        try:
+            api_key = os.environ["API_KEY"]
+            print("API_KEY exists and has the value:", api_key)
+        except KeyError:
+            api_key = input("API_KEY not found in .env. Please enter your API key: ")
+            set_key(".env", "API_KEY", api_key)
 
+
+        
+           
+    # Global Variable for FRED instance and the sleep to avoid tripping timeout
     def get_and_validate_api_key(self):
         """Retrieves API key, stores in .env if valid, and handles errors."""
-
-        load_dotenv()  # Load existing variables (if any)
+        load_dotenv()  # Load environment variables from .env file
         api_key = os.getenv("API_KEY")
+        fred = Fred(api_key=os.getenv("API_KEY")) 
 
         while not api_key:  # Keep asking until a valid key is provided
             api_key = input("API_KEY not found in .env. Please enter your API key: ")
@@ -107,6 +118,8 @@ class daily_export:
 
 
     def daily_series_collector(self):
+        fred = Fred(api_key=os.getenv("API_KEY")) 
+
         merged_data = pd.DataFrame()
         max_retries = 5  # Maximum number of retry attempts
         retry_count = 0  # Current retry count
@@ -160,6 +173,8 @@ class monthly_export:
         max_retries = 5  # Maximum number of retry attempts
         retry_count = 0  # Current retry count
         initial_wait_time = 0.2  # Initial wait time in seconds
+        fred = Fred(api_key=os.getenv("API_KEY")) 
+
 
         for series_id in monthly_export.monthlyfilter(self):
             while retry_count < max_retries:
@@ -211,6 +226,8 @@ class weekly_export:
         max_retries = 5  # Maximum number of retry attempts
         retry_count = 0  # Current retry count
         initial_wait_time = 0.2  # Initial wait time in seconds
+        fred = Fred(api_key=os.getenv("API_KEY")) 
+
 
         for series_id in weekly_export.weeklyfilter(self):
             while retry_count < max_retries:
@@ -246,9 +263,13 @@ class weekly_export:
 
 #Collecting Execution Code into main method
 def main():
+
+
     print("checking access!")
     AccessFred1 = AccessFred()
+    AccessFred1.set_api_key_in_environment()
     AccessFred1.get_and_validate_api_key()
+    fred = Fred(api_key=os.getenv("API_KEY")) 
     print("collecting categories!")
     #Aggregating categorical data and exporting
     GrabCategories1 = collect_categories()
