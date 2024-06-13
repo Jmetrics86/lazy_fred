@@ -11,10 +11,11 @@ python = "^3.10"
 pandas = "^2.0.2"
 fredapi = "^0.5.2"
 python-dotenv = "^1.0.1"
+
+[tool.poetry.group.dev.dependencies]
 ruff = "^0.4.6"
 pytest = "^8.2.1"
 hypothesis = "^6.103.0"
-
 
 [build-system]
 requires = ["poetry-core"]
