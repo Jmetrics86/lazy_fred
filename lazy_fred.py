@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 #set some global varibles here
-sleep = 0.2
+sleep = 0.5
 searchlimit = 10 #1000 is max
 search_categories = ['Interest Rates','Exchange Rates']
 #search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
