@@ -1,1 +1,1 @@
-__all__ = ["lazy_fred", "AccessFred", "CollectCategories"]     # Expose module and a class
+__all__ = ["lazy_fred", "AccessFred", "CollectCategories", "fred"]     # Expose module and a class

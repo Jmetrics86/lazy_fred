@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "lazy_fred"
-version = "0.1.61"
+version = "0.1.62"
 description = "'A simplified aggegate of FRED data using fredapi package'"
 authors = ["Jmetrics86 <jsnbrwstr@gmail.com>"]
 license = "MIT"
