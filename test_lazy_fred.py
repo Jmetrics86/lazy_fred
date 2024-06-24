@@ -2,7 +2,7 @@
 import pandas as pd
 import os
 import tempfile
-from fredapi import Fred
+#from fredapi import Fred
 #import fred
 from .lazy_fred import AccessFred, CollectCategories
 
