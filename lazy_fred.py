@@ -8,15 +8,14 @@ import os
 from dotenv import load_dotenv, set_key
 import json
 
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-#set some global varibles here
 sleep = 0.5
-searchlimit = 10 #1000 is max
-search_categories = ['Interest Rates','Exchange Rates']
-#search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
+searchlimit = 1000 # 1000 is max
+#search_categories = ['Interest Rates', 'Exchange Rates'] #this one is for quick testing
+search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry','gdp' , 'banking', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
+
 
 def add_search_category(category):
     """Adds a new category to the search_categories list."""
@@ -39,10 +38,7 @@ def clear_search_categories():
     search_categories.clear()
     logger.info("Cleared all search categories.")
 
-
 class AccessFred:
-    
-    
     def set_api_key_in_environment(self):
         try:
             api_key = os.environ["API_KEY"]
@@ -50,121 +46,85 @@ class AccessFred:
         except KeyError:
             api_key = input("API_KEY not found in .env. Please enter your API key: ")
             set_key(".env", "API_KEY", api_key)
-
-
-        
-           
-    # Global Variable for FRED instance and the sleep to avoid tripping timeout
+            
     def get_and_validate_api_key(self):
         """Retrieves API key, stores in .env if valid, and handles errors."""
-        load_dotenv()  # Load environment variables from .env file
+        load_dotenv() 
         api_key = os.getenv("API_KEY")
-        fredapi = Fred(api_key=os.getenv("API_KEY")) 
+        fredapi = Fred(api_key=api_key)
 
-        while not api_key:  # Keep asking until a valid key is provided
+        while not api_key:  
             api_key = input("API_KEY not found in .env. Please enter your API key: ")
 
             try:
-                #fredapi = Fred(api_key)
                 fredapi.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
                 logger.info("API key is valid!")
-
-                # Store valid API key in .env
                 set_key(".env", "API_KEY", api_key) 
-                
                 return api_key
             except Exception:
                 logger.error("Invalid API key. Please try again.")
 
+class CollectCategories:
+    def __init__(self, api_key):
+        self.fredapi = Fred(api_key=api_key)
 
-
-
-
-
-# prompt: use fredapiapi to cycle searching through various topics on the list to create a large dataframe of all of the results, after using a for loop to create the master dataframe, remove duplicates.
-
-class collect_categories:        
-
-    def get_fredapi_search_results(self):
-
-        fredapi = Fred(api_key=os.getenv("API_KEY")) 
-
-        max_retries = 5  # Maximum number of retry attempts
-
+    def get_fredapi_search_results(self, categories, searchlimit=1000):
         df_list = []
-        for category in search_categories:
-            retries = 0
-            while retries < max_retries:
-                try:
-                    search_results = fredapi.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
-                    df_list.append(pd.DataFrame(search_results))
-                    time.sleep(sleep)  # Rate limiting
-                    break  # Exit the retry loop if successful
-                except Exception as e:  # Catch any exception
-                    logger.error(f"Error retrieving data for {category}: {e}. Retrying... ({retries}/{max_retries})")  # Log the error for debugging
-                    retries += 1
-                    time.sleep(sleep**retries)  # Increasing wait time on each retry
-            else:
-                print(f"Failed to retrieve data for {category} after {max_retries} attempts.")
-                
-        
-        master_df = pd.concat(df_list)
-        master_df = master_df.drop_duplicates()
-        master_df.loc[:, 'popularity'] = master_df['popularity'].astype(int)
+        total_categories = len(categories)
+        for category in categories:
+            search_results = self.fredapi.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
+            df_list.append(pd.DataFrame(search_results))
+            time.sleep(sleep)
+            print(f"Processing {category} ({index}/{total_categories})", flush=True)  # Updated f-string
+        master_df = pd.concat(df_list).drop_duplicates()
+        master_df['popularity'] = master_df['popularity'].astype(int)
         return master_df
     
-
+    @staticmethod
     def save_dict_to_json(data_dict, filename="data.json"):
         with open(filename, "w") as file:
-            json.dump(data_dict, file, indent=4)  # indent for pretty formatting
+            json.dump(data_dict, file, indent=4)  
 
+    @staticmethod
     def load_dict_from_json(filename="data.json"):
         with open(filename, "r") as file:
             return json.load(file)
-
-    def get_fred_search(self):
-
-        fred_api_key = os.getenv("API_KEY")
-        fred.key(fred_api_key)
-
-        max_retries = 5  # Maximum number of retry attempts
-
+    
+    def get_fred_search(self, categories):
+        fred.key(os.getenv("API_KEY"))
         search_dict = []
+        total_categories = len(categories)
+        for index, category in enumerate(categories, start=1):
+            search_results = fred.search(category)
+            search_dict.append(search_results)
+            time.sleep(sleep)
+            print(f"Processing {category} ({index}/{total_categories})", flush=True)  # Updated f-string
+        CollectCategories.save_dict_to_json(search_dict)
+        return search_dict
 
-        for category in search_categories:
-            retries = 0
-            while retries < max_retries:
-                try:
-                    search_results = fred.search(category)
-                    search_dict.append(search_results)
-                    time.sleep(sleep)  # Rate limiting
-                    break  # Exit the retry loop if successful
-                except Exception as e:  # Catch any exception
-                    logger.error(f"Error retrieving data for {category}: {e}. Retrying... ({retries}/{max_retries})")  # Log the error for debugging
-                    retries += 1
-                    time.sleep(sleep**retries)  # Increasing wait time on each retry
-            else:
-                print(f"Failed to retrieve data for {category} after {max_retries} attempts.")
-                
-        master_search_dict = search_dict
-        collect_categories.save_dict_to_json(master_search_dict)
-        
-        return master_search_dict
-
+    @staticmethod
     def is_valid_date_after_1900(date_str):
         try:
             date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
             return date >= datetime.date(1900, 1, 1)
         except ValueError:
-            False
+            return False
+    
 
 
 
-    def export_master(self):
-        master_df = self.get_fred_search()
-        master_df.to_csv("lazy_fred_Search.csv")
+    def export_master(self, search_results):
+        filtered_series = []
 
-#prompt: using the master_df create a list of series ids filtered down to only series with frequency of daily and popularity above 50.
+        for results_dict in search_results:
+            for series in results_dict['seriess']:
+                observation_start = series.get('observation_start')  # Use .get to safely handle missing keys
+                if observation_start and self.is_valid_date_after_1900(observation_start):
+                    filtered_series.append(series)
+
+        pd.DataFrame(filtered_series).to_csv('filtered_series.csv', index=False)
+
+
 class daily_export:
     def __init__(self, fred):
         self.fred = fred
@@ -316,18 +276,9 @@ class weekly_export:
         print("weekly series completed!")
 
 
-
-
-
-
 def run_fred_data_collection(api_key):
-    """
-    This function orchestrates the entire FRED data collection process,
-    handling API key validation, search result collection, and data export.
-    It also allows interactive management of search categories.
-    """
-
-    # Validate and Store API Key
+    print("""starting collection process
+    """)
     try:
         fred = Fred(api_key=api_key)
         fred.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
@@ -336,7 +287,8 @@ def run_fred_data_collection(api_key):
     except Exception:
         logger.error("Invalid API key provided. Please check and try again.")
         return  # Exit if the API key is invalid
-
+    
+    collector = CollectCategories(api_key)
     while True:
         action = input(
             "Do you want to add (a), remove (r), clear (c) categories, or run (run) the data collection? (q to quit): "
@@ -354,74 +306,35 @@ def run_fred_data_collection(api_key):
             clear_search_categories()
             print(search_categories)
         elif action == 'run':
-            # Collect and Export Data
-            try:
-                print("Creating instance!")
-                grab_categories = collect_categories()
-                print(f"""
-                
-                collecting search results! based on the current list...
+            print("""Collecting Search Results from the master list!
+             """)
+            search_results = collector.get_fred_search(search_categories)
+            collector.export_master(search_results)
+            print("""Pulling data at a daily level
+             """)
+            daily_exporter = daily_export(Fred(api_key=api_key))
+            daily_exporter.dailyfilter()
+            daily_exporter.daily_series_collector()
+            print("""Pulling data at a monthly level
+             """)
+            monthly_exporter = monthly_export(Fred(api_key=api_key))
+            monthly_exporter.monthlyfilter()
+            monthly_exporter.monthly_series_collector()
+            print("""Pulling data at a weekly level
+             """)
+            weekly_exporter = weekly_export(Fred(api_key=api_key))
+            weekly_exporter.weeklyfilter()
+            weekly_exporter.weekly_series_collector()
 
-                {search_categories}
-
-                """)
-                grab_categories.get_fred_search()
-                
-                print("export series master list!")
-                
-                # Extract and filter series data
-                master_search_dict = collect_categories.load_dict_from_json()
-                filtered_series = []
-                for series in master_search_dict['seriess']:
-                    if grab_categories.is_valid_date_after_1900(series['observation_start']):
-                        filtered_series.append(series)
-
-                    # Now, filtered_series contains the data you want.
-                    # You can work with it as a list of dictionaries.
-
-                    df = pd.DataFrame(filtered_series)
-
-                    df.to_csv('filtered_series.csv', index=False)
-
-                grab_categories.export_master()
-
-                print("collecting daily data!")
-                daily_exporter = daily_export(fred)
-                daily_exporter.dailyfilter()
-                daily_exporter.daily_series_collector()
-
-                print("collecting monthly data!")
-                monthly_exporter = monthly_export(fred)
-                monthly_exporter.monthlyfilter()
-                monthly_exporter.monthly_series_collector()
-
-                print("collecting weekly data!")
-                weekly_exporter = weekly_export(fred)
-                weekly_exporter.weeklyfilter()
-                weekly_exporter.weekly_series_collector()
-
-                print("complete!")
-
-            except Exception as e:
-                logger.error(f"An error occurred during data collection: {e}")
+            print("complete!")
             break  # Exit the loop after running
         elif action == 'q':
             break  # Exit the loop
         else:
             print("Invalid input. Please choose a valid action.")
 
-
-#Collecting Execution Code into main method
 def main():
     run_fred_data_collection(os.getenv("API_KEY"))
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
