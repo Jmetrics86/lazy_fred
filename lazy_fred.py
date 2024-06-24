@@ -71,7 +71,7 @@ class CollectCategories:
     def get_fredapi_search_results(self, categories, searchlimit=1000):
         df_list = []
         total_categories = len(categories)
-        for category in categories:
+        for index, category in categories:
             search_results = self.fredapi.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
             df_list.append(pd.DataFrame(search_results))
             time.sleep(sleep)

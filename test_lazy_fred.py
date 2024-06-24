@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import tempfile
 from fredapi import Fred
-from .lazy_fred import AccessFred, collect_categories
+from .lazy_fred import AccessFred, CollectCategories
 
 
 
@@ -18,20 +18,24 @@ def test_api_key_validation():
 
 def test_get_fred_search_results():
     """Tests that search results are retrieved and processed correctly."""
-    # Set up mock FRED instance if needed
-    # fred_mock = ...  (create your mock fred instance)
 
-    collect = collect_categories()
-    results = collect.get_fred_search_results() 
+    api_key = os.getenv("API_KEY")
+
+    collect = CollectCategories(api_key)
+    results = collect.get_fred_search(categories=['gdp', 'banking']) #get_fred_search(self, categories)
+    # Check if output is a dictionary
     
-    # Check if output is a DataFrame
-    assert isinstance(results, pd.DataFrame)
-    
+    assert isinstance(results, list)
+    assert isinstance(results[0], dict)
+
+    results = results[0]
+    results_df = pd.DataFrame.from_dict(results)
+
     # Check columns exist
-    assert set(results.columns) == {'id', 'realtime_start', 'realtime_end', 'title', 'observation_start', 'observation_end', 'frequency', 'frequency_short', 'popularity', 'notes', 'last_updated', 'seasonal_adjustment_short', 'seasonal_adjustment', 'units', 'units_short'}
+    assert set(results_df.columns) == {'seriess', 'sort_order', 'order_by', 'offset', 'limit', 'count', 'realtime_start', 'realtime_end'}
     
     # Check for duplicates
-    assert not results.duplicated(subset=['id']).any()
+    assert not results_df.duplicated(subset=['seriess']).any()
     
 
 
