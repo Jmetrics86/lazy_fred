@@ -91,6 +91,7 @@ class CollectCategories:
             return json.load(file)
     
     def get_fred_search(self, categories):
+        load_dotenv()
         fred.key(os.getenv("API_KEY"))
         search_dict = []
         total_categories = len(categories)
@@ -279,6 +280,7 @@ class weekly_export:
 def run_fred_data_collection(api_key):
     print("""starting collection process
     """)
+    load_dotenv()
     set_key(".env", "API_KEY", api_key)
 
     try:
