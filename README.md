@@ -1,5 +1,6 @@
 # lazy_fred
-![example workflow](https://github.com/Jmetrics86/lazy_fred//actions/workflows/python-app.yml/badge.svg)
+![example workflow](https://github.com/Jmetrics86/lazy_fred//actions/workflows/python-app.yml/badge.svg) ![PyPI - Version](https://img.shields.io/pypi/v/lazy_fred)
+
 
 # lazy_fred: Effortless FRED Data Collection
 
