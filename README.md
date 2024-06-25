@@ -29,16 +29,12 @@ lazy_fred is a Python library designed to simplify the process of collecting eco
 3. **Obtain a FRED API Key:**
 
    - Visit the [FRED website](https://fred.stlouisfed.org/docs/api/fred/) and get your free API key.
-   - Create a `.env` file in the project root directory and add your API key:
 
-     ```
-     API_KEY=your_api_key_here
-     ```
 
 ## Usage
 
 1. **Configure Search Categories:**
-   - Modify the `search_categories` list in the script to include the categories of interest.
+   - Modify the `search_categories` list in the script to include the categories of interest. The defualt list of 30 items have been chosen from the structure of the FRED website navigation and some personal decisions.
 
 2. **Run the Script:**
 
@@ -65,6 +61,27 @@ lazy_fred is a Python library designed to simplify the process of collecting eco
   - Filter series by frequency and popularity.
   - Collect and export time series data.
 
+## Packaging: pypi.org/project/lazy_fred/
+
+   The code has been packaged and can also be pip installed as 
+
+   ```bash
+   pip install lazy_fred
+   ```
+
+   Make sure you are on the latest version (https://pypi.org/project/lazy_fred/).
+
+## Package Instructions
+
+   The code is simple, create and instance and add your API key!
+
+   ```bash   
+   import lazy_fred as lf
+   lf.run_fred_data_collection("insert_api_key_here")
+   ```
+
+
+
 ## Contributions
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
@@ -79,7 +96,7 @@ This library is not affiliated with or endorsed by the Federal Reserve Bank of S
 
 ## Acknowledgments
 
-- This project utilizes the `fredapi` library for interacting with the FRED API.
+- This project utilizes the `fredapi` and `fred` libraries for interacting with the FRED API.
 
 ## Contact
 
