@@ -279,11 +279,13 @@ class weekly_export:
 def run_fred_data_collection(api_key):
     print("""starting collection process
     """)
+    set_key(".env", "API_KEY", api_key)
+
     try:
         fred = Fred(api_key=api_key)
         fred.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
         logger.info("API key is valid!")
-        set_key(".env", "API_KEY", api_key)
+        
     except Exception:
         logger.error("Invalid API key provided. Please check and try again.")
         return  # Exit if the API key is invalid
@@ -293,6 +295,8 @@ def run_fred_data_collection(api_key):
         action = input(
             "Do you want to add (a), remove (r), clear (c) categories, or run (run) the data collection? (q to quit): "
         ).lower()
+
+        set_key(".env", "API_KEY", api_key)
 
         if action == 'a':
             category = input("Enter category to add: ")
