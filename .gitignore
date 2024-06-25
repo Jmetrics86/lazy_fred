@@ -2,6 +2,7 @@
 *.csv
 lazy_fred.code-workspace
 app.log
+data.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
