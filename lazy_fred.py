@@ -131,7 +131,7 @@ class daily_export:
         self.fred = fred
 
     def dailyfilter(self):
-        master_df = pd.read_csv('lazy_fred_Search.csv')
+        master_df = pd.read_csv('filtered_series.csv')
         filtered_df = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'D')]
         daily_list = filtered_df['id'].tolist()
         return daily_list
@@ -180,7 +180,7 @@ class monthly_export:
 
     # prompt: using the master_df create a list of series ids filtered down to only series with frequency of monthly and popularity above 50.
     def monthlyfilter(self):
-        master_df = pd.read_csv('lazy_fred_Search.csv')
+        master_df = pd.read_csv('filtered_series.csv')
         monthly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'M')]
         monthly_list = monthly_list['id'].tolist()
         return monthly_list
@@ -234,7 +234,7 @@ class weekly_export:
 
     # prompt: using the master_df create a list of series ids filtered down to only series with frequency of weekly and popularity above 50.
     def weeklyfilter(self):
-        master_df = pd.read_csv('lazy_fred_Search.csv')
+        master_df = pd.read_csv('filtered_series.csv')
         weekly_list = master_df[(master_df['popularity'] >= 50) & (master_df['frequency_short'] == 'W')]
         weekly_list = weekly_list['id'].tolist()
         return weekly_list
