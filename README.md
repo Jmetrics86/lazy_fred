@@ -1,4 +1,5 @@
-# lazy_fred
+![lazy_fred_social](https://github.com/Jmetrics86/lazy_fred/assets/19334741/c7ae2ec3-2ef6-4ca7-b126-78622537d5e0)
+
 ![example workflow](https://github.com/Jmetrics86/lazy_fred//actions/workflows/python-app.yml/badge.svg) ![PyPI - Version](https://img.shields.io/pypi/v/lazy_fred)
 
 
