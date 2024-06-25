@@ -45,7 +45,7 @@ lazy_fred is a Python library designed to simplify the process of collecting eco
 
 3. **Output:**
    - The script will create three CSV files in your project directory:
-     - `lazy_fred_Search.csv`: Contains the search results from FRED.
+     - `filtered_series.csv`: Contains the search results from FRED cleaned to popularity over 50 and observation starts after 1900.
      - `daily_data.csv`: Contains daily time series data.
      - `monthly_data.csv`: Contains monthly time series data.
      - `weekly_data.csv`: Contains weekly time series data.
