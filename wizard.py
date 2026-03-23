@@ -34,8 +34,20 @@ from rich import box
 from InquirerPy import inquirer
 from InquirerPy.separator import Separator
 
+from data_store import DataStore, save_config, list_configs, load_config
+
 logger = logging.getLogger(__name__)
 console = Console()
+
+# ── Beginner-friendly key hints ───────────────────────────────────────────────
+
+HINT_ARROWS = "[dim cyan]↑↓[/] move"
+HINT_SPACE = "[dim cyan]Space[/] toggle"
+HINT_ENTER = "[dim cyan]Enter[/] confirm"
+HINT_TYPE = "[dim cyan]Type[/] your answer, then [dim cyan]Enter[/]"
+
+def _show_hint(*parts: str):
+    console.print("  " + "   ".join(parts))
 
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
@@ -248,11 +260,15 @@ def show_welcome():
 
     console.print()
     console.print(Panel(
-        "[bold]FRED API Rate Limit:[/]  2 requests / second  (120 / minute)\n\n"
-        "Download times depend on the number of series selected.\n"
-        "Time estimates are shown next to each option so you know\n"
-        "what to expect before you start.",
-        title="[dim]About Timing[/dim]",
+        "[bold]How to use this wizard[/]\n\n"
+        "  [cyan]↑ ↓[/]  arrow keys   — move between options\n"
+        "  [cyan]Space[/]              — check / uncheck an item\n"
+        "  [cyan]Enter[/]              — confirm your choice\n"
+        "  [cyan]Type[/]               — when you see a blinking cursor,\n"
+        "                         just type your answer and press Enter\n\n"
+        "[dim]Time estimates are shown next to each option.\n"
+        "FRED API rate limit: 2 requests/second (120/min).[/dim]",
+        title="[dim]Keyboard Guide[/dim]",
         border_style="dim",
         padding=(0, 2),
     ))
@@ -273,6 +289,7 @@ def step_api_key() -> str:
     if existing:
         masked = existing[:6] + "•" * 20 + existing[-4:]
         console.print(f"  Found existing key: [dim]{masked}[/dim]")
+        _show_hint(HINT_ARROWS, HINT_ENTER)
         use_existing = inquirer.confirm(
             message="Use this API key?", default=True
         ).execute()
@@ -310,49 +327,79 @@ def step_api_key() -> str:
 
 # ── Step 2 — Choose series ─────────────────────────────────────────────────────
 
-def step_choose_series(fred_client: Fred) -> list[str]:
+def step_choose_series(fred_client: Fred) -> tuple[list[str], str]:
+    """Returns (series_ids, mode_name)."""
     console.print()
     console.print(Panel(
         "[bold]Step 2 of 4[/]  —  Choose Data Series",
         border_style="bright_blue", box=box.ROUNDED,
     ))
 
+    saved = list_configs()
+
     popular_est = _estimate_download(TOTAL_POPULAR)
     kitchen_est_search = _fmt_duration(
         len(KITCHEN_SINK_CATEGORIES) * SECS_PER_SEARCH_CATEGORY)
 
-    mode = inquirer.select(
+    choices = []
+
+    if saved:
+        for cfg in saved[:5]:
+            n = len(cfg.get("series_ids", []))
+            name = cfg.get("name", "Untitled")
+            est = _estimate_download(n)
+            choices.append({
+                "name": f"Saved: {name}  ({n} series, {est})",
+                "value": ("saved", cfg["_file"]),
+            })
+        choices.append(Separator("  ── or start fresh ──"))
+
+    choices.extend([
+        {"name": (f"Browse popular series  "
+                  f"({TOTAL_POPULAR} series, {popular_est})"),
+         "value": ("popular", None)},
+        {"name": "Enter series IDs manually  (comma-separated)",
+         "value": ("manual", None)},
+        {"name": "Search FRED by keyword",
+         "value": ("search", None)},
+        Separator(),
+        {"name": (f"Kitchen Sink — discover & download everything  "
+                  f"({len(KITCHEN_SINK_CATEGORIES)} categories, "
+                  f"search {kitchen_est_search} + download varies)"),
+         "value": ("kitchen_sink", None)},
+    ])
+
+    _show_hint(HINT_ARROWS, HINT_ENTER)
+    mode, extra = inquirer.select(
         message="How would you like to pick series?",
-        choices=[
-            {"name": (f"Browse popular series  "
-                      f"({TOTAL_POPULAR} series, {popular_est})"),
-             "value": "popular"},
-            {"name": "Enter series IDs manually  (comma-separated)",
-             "value": "manual"},
-            {"name": "Search FRED by keyword",
-             "value": "search"},
-            Separator(),
-            {"name": (f"Kitchen Sink — discover & download everything  "
-                      f"({len(KITCHEN_SINK_CATEGORIES)} categories, "
-                      f"search {kitchen_est_search} + download varies)"),
-             "value": "kitchen_sink"},
-        ],
-        default="popular",
+        choices=choices,
+        default=choices[0]["value"] if saved else ("popular", None),
     ).execute()
 
-    if mode == "popular":
-        return _browse_popular()
+    if mode == "saved":
+        return _load_saved_config(extra)
+    elif mode == "popular":
+        return _browse_popular(), "popular"
     elif mode == "manual":
-        return _manual_entry(fred_client)
+        return _manual_entry(fred_client), "manual"
     elif mode == "search":
-        return _keyword_search(fred_client)
+        return _keyword_search(fred_client), "search"
     else:
-        return _kitchen_sink(fred_client)
+        return _kitchen_sink(fred_client), "kitchen_sink"
+
+
+def _load_saved_config(path: str) -> tuple[list[str], str]:
+    cfg = load_config(path)
+    ids = cfg.get("series_ids", [])
+    name = cfg.get("name", "Untitled")
+    console.print(f"  Loaded [bold]{name}[/bold] — {len(ids)} series")
+    return ids, f"saved:{name}"
 
 
 def _browse_popular() -> list[str]:
     categories = list(POPULAR_SERIES.keys())
 
+    _show_hint(HINT_ARROWS, HINT_SPACE, HINT_ENTER)
     selected_cats = inquirer.checkbox(
         message="Select categories (Space to toggle, Enter to confirm):",
         choices=[
@@ -376,6 +423,7 @@ def _browse_popular() -> list[str]:
                   f"series: [bold]{est}[/bold][/dim]")
     console.print()
 
+    _show_hint(HINT_ARROWS, HINT_SPACE, HINT_ENTER)
     selected = inquirer.checkbox(
         message="Select individual series (Space to toggle, Enter to confirm):",
         choices=[
@@ -395,6 +443,7 @@ def _manual_entry(fred_client: Fred) -> list[str]:
     console.print()
     console.print("  [dim]Enter FRED series IDs separated by commas.[/dim]")
     console.print("  [dim]Example: GDP, UNRATE, DGS10, SP500[/dim]")
+    _show_hint(HINT_TYPE)
     console.print()
 
     while True:
@@ -712,6 +761,7 @@ def step_lookback(n_series: int) -> str | None:
 
     today = datetime.date.today()
 
+    _show_hint(HINT_ARROWS, HINT_ENTER)
     choice = inquirer.select(
         message="How far back should the data go?",
         choices=[
@@ -1067,6 +1117,131 @@ def show_confirmation(series_ids: list[str], start_date: str | None) -> bool:
     ).execute()
 
 
+# ── Database integration ──────────────────────────────────────────────────────
+
+def _store_to_database(output_files: dict, series_ids: list[str],
+                       start_date: str | None,
+                       config_name: str | None) -> dict:
+    """Save downloaded data into the local SQLite history database."""
+    db = DataStore()
+
+    run_id = db.start_run(series_ids, start_date, config_name)
+
+    total_new = 0
+    total_updated = 0
+
+    for freq, info in output_files.items():
+        path = info.get("full_path", info["file"])
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            continue
+
+        rows = []
+        for _, row in df.iterrows():
+            sid = row.get("series")
+            date_val = row.get("date")
+            value = row.get("value")
+            if sid and date_val is not None:
+                rows.append((str(sid), str(date_val), value))
+
+        if rows:
+            new, updated = db.upsert_observations(rows, run_id, freq)
+            total_new += new
+            total_updated += updated
+
+    db.finish_run(run_id, total_new, total_updated)
+
+    stats = db.get_total_stats()
+    db.close()
+
+    return {
+        "run_id": run_id,
+        "new_rows": total_new,
+        "updated_rows": total_updated,
+        "total_series": stats["series_count"],
+        "total_observations": stats["observation_count"],
+        "date_range": (stats["min_date"], stats["max_date"]),
+    }
+
+
+def _show_reconciliation(db_result: dict):
+    """Display the reconciliation summary after storing to database."""
+    console.print()
+    table = Table(
+        title="[bold bright_cyan]Database Updated[/]",
+        box=box.ROUNDED, border_style="bright_cyan",
+    )
+    table.add_column("Metric", style="bold")
+    table.add_column("Value", justify="right")
+
+    table.add_row("New observations added",
+                  f"[green]{db_result['new_rows']:,}[/]")
+    table.add_row("Existing rows updated",
+                  f"[yellow]{db_result['updated_rows']:,}[/]")
+    table.add_section()
+    table.add_row("Total series in database",
+                  str(db_result['total_series']))
+    table.add_row("Total observations stored",
+                  f"[bold]{db_result['total_observations']:,}[/]")
+
+    min_d, max_d = db_result["date_range"]
+    if min_d and max_d:
+        table.add_row("Date range", f"{min_d}  →  {max_d}")
+
+    console.print(table)
+
+    db_path = os.path.abspath(DataStore.db_path
+                              if hasattr(DataStore, "db_path")
+                              else "lazy_fred_history.db")
+    console.print(f"\n  [dim]Database: [bold]{db_path}[/bold][/dim]")
+
+    if db_result["updated_rows"] > 0:
+        console.print()
+        console.print(Panel(
+            f"[bold]{db_result['updated_rows']:,}[/] existing data points "
+            "were refreshed with the latest values from FRED.\n"
+            "FRED revises published data, so the newest pull is kept.\n\n"
+            "[dim]The database tracks when each observation was first and\n"
+            "last pulled, so you always have a full audit trail.[/dim]",
+            title="[bold]Reconciliation[/]",
+            border_style="cyan",
+            padding=(0, 2),
+        ))
+
+
+# ── Save configuration prompt ────────────────────────────────────────────────
+
+def _ask_save_config(series_ids: list[str], start_date: str | None,
+                     mode: str | None):
+    console.print()
+    _show_hint(HINT_ARROWS, HINT_ENTER)
+    should_save = inquirer.confirm(
+        message="Save this configuration for future re-use?",
+        default=True,
+    ).execute()
+
+    if not should_save:
+        return
+
+    _show_hint(HINT_TYPE)
+    name = inquirer.text(
+        message="Give this configuration a name:",
+        default="My FRED data",
+        validate=lambda v: len(v.strip()) > 0,
+    ).execute()
+
+    path = save_config(
+        name=name.strip(),
+        series_ids=series_ids,
+        lookback=start_date,
+        mode=mode,
+    )
+    console.print(f"  [green]Saved![/green]  Config file: [bold]{path}[/bold]")
+    console.print("  [dim]Next time you run the wizard, this will appear "
+                  "as a quick-start option.[/dim]")
+
+
 # ── Main wizard ───────────────────────────────────────────────────────────────
 
 def main():
@@ -1075,7 +1250,7 @@ def main():
     api_key = step_api_key()
     fred_client = Fred(api_key=api_key)
 
-    series_ids = step_choose_series(fred_client)
+    series_ids, mode = step_choose_series(fred_client)
     if not series_ids:
         console.print("[yellow]No series selected. Exiting.[/yellow]")
         sys.exit(0)
@@ -1089,6 +1264,15 @@ def main():
     output_files, elapsed = step_fetch_and_export(
         fred_client, series_ids, start_date)
     print_summary(output_files, elapsed)
+
+    if output_files:
+        with console.status("[bold cyan]Saving to local database…[/]"):
+            db_result = _store_to_database(
+                output_files, series_ids, start_date,
+                config_name=mode)
+        _show_reconciliation(db_result)
+
+        _ask_save_config(series_ids, start_date, mode)
 
 
 if __name__ == "__main__":
