@@ -14,6 +14,8 @@ import time
 import datetime
 import logging
 import math
+import csv
+import threading
 
 import pandas as pd
 from fredapi import Fred
@@ -34,6 +36,91 @@ from InquirerPy.separator import Separator
 
 logger = logging.getLogger(__name__)
 console = Console()
+
+
+# ── Rate limiter ──────────────────────────────────────────────────────────────
+# FRED allows 2 requests/second. We enforce 1.8/sec to leave headroom.
+
+class _RateLimiter:
+    """Thread-safe token-bucket rate limiter."""
+
+    def __init__(self, max_per_second: float = 1.8):
+        self._min_interval = 1.0 / max_per_second
+        self._lock = threading.Lock()
+        self._last = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last
+            if elapsed < self._min_interval:
+                time.sleep(self._min_interval - elapsed)
+            self._last = time.monotonic()
+
+
+_rate = _RateLimiter()
+
+
+def _fred_call(fn, *args, retries: int = 4, **kwargs):
+    """Call a FRED API function with rate-limiting and retry on 429/5xx."""
+    for attempt in range(retries):
+        _rate.wait()
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            msg = str(exc)
+            is_transient = any(code in msg for code in
+                               ("429", "500", "502", "503",
+                                "Too Many Requests", "Internal Server Error",
+                                "Service Unavailable", "Bad Gateway"))
+            if is_transient and attempt < retries - 1:
+                wait = 1.0 * (2 ** attempt)
+                time.sleep(wait)
+                continue
+            raise
+
+
+# ── Error log ─────────────────────────────────────────────────────────────────
+
+class ErrorLog:
+    """Collect errors during a wizard run and write to CSV."""
+
+    def __init__(self):
+        self._rows: list[dict] = []
+
+    def add(self, phase: str, series_id: str, error_type: str, message: str):
+        self._rows.append({
+            "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+            "phase": phase,
+            "series_id": series_id,
+            "error_type": error_type,
+            "message": str(message)[:300],
+        })
+
+    @property
+    def count(self) -> int:
+        return len(self._rows)
+
+    def write_csv(self, path: str = "error_log.csv"):
+        if not self._rows:
+            return None
+        fieldnames = ["timestamp", "phase", "series_id",
+                      "error_type", "message"]
+        with open(path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self._rows)
+        return path
+
+    def summary_table(self) -> dict[str, int]:
+        """Return counts by error_type."""
+        counts: dict[str, int] = {}
+        for r in self._rows:
+            counts[r["error_type"]] = counts.get(r["error_type"], 0) + 1
+        return counts
+
+
+errors = ErrorLog()
 
 # ── Timing constants ───────────────────────────────────────────────────────────
 # FRED allows 2 requests/second. Each series needs ~2 calls (metadata + data).
@@ -467,6 +554,7 @@ def _kitchen_sink(fred_client: Fred) -> list[str]:
         for cat in KITCHEN_SINK_CATEGORIES:
             progress.update(task, description=f"[cyan]Searching '{cat}'[/]")
             try:
+                _rate.wait()
                 results = fred_lib.search(cat)
                 for s in results.get("seriess", []):
                     sid = s.get("id")
@@ -484,9 +572,8 @@ def _kitchen_sink(fred_client: Fred) -> list[str]:
                                 "pop": pop,
                             }
             except Exception as exc:
-                console.print(f"  [red]Error searching '{cat}': {exc}[/red]")
+                errors.add("search", cat, type(exc).__name__, str(exc))
             progress.advance(task)
-            time.sleep(0.5)
 
     freq_counts: dict[str, int] = {}
     for info in all_series.values():
@@ -575,14 +662,13 @@ def _validate_series(fred_client: Fred, ids: list[str]) -> list[str]:
         task = progress.add_task("Validating series…", total=len(ids))
         for sid in ids:
             try:
-                fred_client.get_series_info(sid)
+                _fred_call(fred_client.get_series_info, sid)
                 valid.append(sid)
                 progress.update(task, description=f"[green]✓ {sid}[/]")
             except Exception:
                 progress.update(
                     task, description=f"[red]✗ {sid} — not found[/]")
             progress.advance(task)
-            time.sleep(0.15)
 
     console.print(f"  [bold]{len(valid)}[/] of {len(ids)} series validated.")
     return valid
@@ -688,19 +774,39 @@ def step_fetch_and_export(fred_client: Fred, series_ids: list[str],
     buckets: dict[str, list[str]] = {}
     series_meta: dict[str, dict] = {}
 
-    with console.status("[bold cyan]Fetching series metadata…[/]"):
+    n_ids = len(series_ids)
+    meta_skipped = 0
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=30),
+        TextColumn("{task.completed}/{task.total}"),
+        TextColumn("•"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        meta_task = progress.add_task(
+            "[cyan]Fetching metadata…[/]", total=n_ids)
         for sid in series_ids:
+            progress.update(
+                meta_task, description=f"[cyan]Metadata: {sid}[/]")
             try:
-                info = fred_client.get_series_info(sid)
+                info = _fred_call(fred_client.get_series_info, sid)
                 freq = info.get("frequency_short", "other")
                 buckets.setdefault(freq, []).append(sid)
                 series_meta[sid] = {
                     "title": info.get("title", ""),
                     "frequency": freq,
                 }
-                time.sleep(0.12)
-            except Exception:
-                console.print(f"  [red]Could not get info for {sid}[/red]")
+            except Exception as exc:
+                meta_skipped += 1
+                errors.add("metadata", sid,
+                           type(exc).__name__, str(exc))
+            progress.advance(meta_task)
+
+    if meta_skipped:
+        console.print(f"  [yellow]Skipped {meta_skipped} series "
+                      f"(metadata errors — see error_log.csv)[/yellow]")
 
     _print_frequency_breakdown(buckets)
 
@@ -730,9 +836,11 @@ def step_fetch_and_export(fred_client: Fred, series_ids: list[str],
 
             for sid in ids:
                 title = series_meta.get(sid, {}).get("title", "")[:40]
+                err_label = (f"  [dim red]({errors.count} errors)[/]"
+                             if errors.count else "")
                 progress.update(
                     main_task,
-                    description=f"[cyan]{sid}[/] — {title}",
+                    description=(f"[cyan]{sid}[/] — {title}{err_label}"),
                 )
                 data = _fetch_one_series(fred_client, sid, start_date)
                 if data is not None and not data.empty:
@@ -774,7 +882,10 @@ def _print_frequency_breakdown(buckets: dict):
 
 
 MAX_RETRIES = 5
-INITIAL_WAIT = 0.3
+
+# Pandas nanosecond timestamps only cover ~1677-2262.
+# Series older than this boundary need special handling.
+_PANDAS_MIN_DATE = "1700-01-01"
 
 
 def _fetch_one_series(fred_client: Fred, series_id: str,
@@ -783,23 +894,33 @@ def _fetch_one_series(fred_client: Fred, series_id: str,
     if start_date:
         kwargs["observation_start"] = start_date
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            data = pd.DataFrame(
-                fred_client.get_series(series_id, **kwargs))
-            data["series"] = series_id
-            time.sleep(0.25)
-            return data
-        except Exception as exc:
-            msg = str(exc)
-            if "429" in msg or "Too Many Requests" in msg:
-                wait = INITIAL_WAIT * 2 ** attempt
-                time.sleep(wait)
-            else:
-                logger.error("Error fetching %s: %s", series_id, exc)
-                return None
-    logger.error("Max retries for %s", series_id)
-    return None
+    try:
+        raw = _fred_call(fred_client.get_series, series_id,
+                         retries=MAX_RETRIES, **kwargs)
+    except Exception as exc:
+        errors.add("download", series_id, type(exc).__name__, str(exc))
+        return None
+
+    if raw is None or (hasattr(raw, "empty") and raw.empty):
+        return None
+
+    try:
+        data = pd.DataFrame(raw)
+        data["series"] = series_id
+        return data
+    except (pd.errors.OutOfBoundsDatetime, OverflowError):
+        pass
+
+    try:
+        data = pd.DataFrame({"value": raw.values, "series": series_id},
+                            index=raw.index.astype(str))
+        data.index.name = raw.index.name
+        errors.add("download", series_id, "DatetimeOverflow",
+                   "Dates converted to strings (pre-1677 data)")
+        return data
+    except Exception as exc:
+        errors.add("download", series_id, type(exc).__name__, str(exc))
+        return None
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -851,6 +972,22 @@ def print_summary(output_files: dict, elapsed: float):
     console.print(f"\n  [dim]Completed in [bold]{elapsed_str}[/bold] "
                   f"({elapsed:.0f}s) — "
                   f"{rate:.1f} series/sec[/dim]")
+
+    log_path = errors.write_csv()
+    if log_path:
+        err_summary = errors.summary_table()
+        err_table = Table(
+            title=f"[bold yellow]Errors ({errors.count} total)[/]",
+            box=box.ROUNDED, border_style="yellow",
+        )
+        err_table.add_column("Error Type", style="bold")
+        err_table.add_column("Count", justify="right")
+        for etype, cnt in sorted(err_summary.items()):
+            err_table.add_row(etype, str(cnt))
+        console.print()
+        console.print(err_table)
+        console.print(f"\n  [yellow]Full error details saved to "
+                      f"[bold]{log_path}[/bold][/yellow]")
 
     console.print()
     console.print(Panel(
