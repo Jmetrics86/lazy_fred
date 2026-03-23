@@ -852,9 +852,11 @@ def step_fetch_and_export(fred_client: Fred, series_ids: list[str],
                 combined = combined.rename(
                     columns={"index": "date", 0: "value"})
                 fname = f"{label}_data.csv"
-                combined.to_csv(fname, index=False)
+                full_path = os.path.abspath(fname)
+                combined.to_csv(full_path, index=False)
                 output_files[freq] = {
                     "file": fname,
+                    "full_path": full_path,
                     "series_count": len(ids),
                     "row_count": len(combined),
                 }
@@ -935,6 +937,16 @@ def print_summary(output_files: dict, elapsed: float):
         ))
         return
 
+    output_dir = os.getcwd()
+    any_info = next(iter(output_files.values()))
+    if "full_path" in any_info:
+        output_dir = os.path.dirname(any_info["full_path"])
+
+    console.print(Panel(
+        f"[bold]Output directory:[/]  {output_dir}",
+        border_style="bright_green", box=box.ROUNDED,
+    ))
+
     table = Table(
         title="[bold bright_green]Download Complete[/]",
         box=box.ROUNDED, border_style="bright_green",
@@ -973,7 +985,8 @@ def print_summary(output_files: dict, elapsed: float):
                   f"({elapsed:.0f}s) — "
                   f"{rate:.1f} series/sec[/dim]")
 
-    log_path = errors.write_csv()
+    log_path = errors.write_csv(
+        os.path.join(output_dir, "error_log.csv"))
     if log_path:
         err_summary = errors.summary_table()
         err_table = Table(
@@ -986,14 +999,24 @@ def print_summary(output_files: dict, elapsed: float):
             err_table.add_row(etype, str(cnt))
         console.print()
         console.print(err_table)
-        console.print(f"\n  [yellow]Full error details saved to "
+        console.print(f"\n  [yellow]Full error details → "
                       f"[bold]{log_path}[/bold][/yellow]")
+
+    file_list = "\n".join(
+        f"    {info['full_path']}"
+        for info in output_files.values()
+        if "full_path" in info
+    )
+    first_file = next(
+        (info["full_path"] for info in output_files.values()
+         if "full_path" in info), "daily_data.csv")
 
     console.print()
     console.print(Panel(
-        "[dim]Open these CSV files in Excel, Google Sheets, or Python:[/]\n\n"
+        f"[dim]Your files are saved at:[/]\n{file_list}\n\n"
+        "[dim]Open them in Excel, Google Sheets, or Python:[/]\n\n"
         "  [bold cyan]import pandas as pd[/]\n"
-        "  [bold cyan]df = pd.read_csv('daily_data.csv')[/]",
+        f"  [bold cyan]df = pd.read_csv('{first_file}')[/]",
         title="[bold]Next Steps[/]",
         border_style="dim",
         padding=(1, 2),
@@ -1011,6 +1034,7 @@ def show_confirmation(series_ids: list[str], start_date: str | None) -> bool:
     ))
 
     est = _estimate_download(len(series_ids))
+    save_dir = os.path.abspath(os.getcwd())
 
     table = Table(box=box.SIMPLE, show_header=False, border_style="dim")
     table.add_column("Key", style="bold")
@@ -1020,6 +1044,7 @@ def show_confirmation(series_ids: list[str], start_date: str | None) -> bool:
         "Lookback",
         "All history" if not start_date else f"From {start_date}",
     )
+    table.add_row("Save to", f"{save_dir}/")
     table.add_row("Est. Time", f"[bold]{est}[/]")
     console.print(table)
 
