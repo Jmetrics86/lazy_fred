@@ -18,6 +18,9 @@ ruff = "^0.4.6"
 pytest = "^8.2.1"
 hypothesis = "^6.103.0"
 
+[tool.poetry.scripts]
+lazy-fred-wizard = "wizard:main"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
