@@ -11,6 +11,10 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # Opt-in to Node.js 24 for GitHub-hosted JavaScript actions.
+      # This avoids Node.js 20 deprecation warnings and future breakage.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: Checkout code
