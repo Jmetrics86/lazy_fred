@@ -2,95 +2,78 @@
 
 ![example workflow](https://github.com/Jmetrics86/lazy_fred//actions/workflows/python-app.yml/badge.svg) ![PyPI - Version](https://img.shields.io/pypi/v/lazy_fred)
 
-
 # lazy_fred: Effortless FRED Data Collection
 
-lazy_fred is a Python library designed to simplify the process of collecting economic data from the Federal Reserve Economic Data (FRED) API. It automates searching for relevant series, filtering by frequency and popularity, and exporting the data into convenient CSV files.
+`lazy_fred` is a Python library designed to simplify collecting economic data from the Federal Reserve Economic Data (FRED) API. It searches across categories, filters series by popularity/frequency, and exports results to CSV files.
 
 ## Features
-
-- **Automated Search:** Searches FRED across various economic categories.
-- **Filtered Selection:** Selects series based on popularity and frequency (daily, weekly, monthly).
-- **Error Handling:** Includes retry mechanisms and logging for robust data collection.
-- **CSV Export:** Saves the collected data in separate CSV files for easy analysis.
+- Automated search across FRED categories
+- Filtered selection by frequency (daily/weekly/monthly) and popularity
+- Retry and logging for robust data collection
+- CSV exports for the filtered series + daily/weekly/monthly observations
 
 ## Installation
 
-1. **Clone the Repository:**
+### From PyPI (recommended)
+```bash
+python -m pip install --upgrade lazy_fred
+```
 
+### From source (Poetry)
+```bash
+poetry install
+```
+
+## Configure your FRED API key
+
+`lazy_fred` expects a `FRED API_KEY`. You can provide it either by:
+
+1. Creating a local `.env` file in your working directory:
    ```bash
-   git clone https://github.com/your-username/lazy_fred.git
+   API_KEY=your_fred_api_key_here
    ```
-
-2. **Install Dependencies:**
-
+2. Or exporting it as an environment variable:
    ```bash
-   pip install -r requirements.txt
+   set API_KEY=your_fred_api_key_here
    ```
 
-3. **Obtain a FRED API Key:**
+If `API_KEY` is missing, the CLI will prompt you for it and write it to `.env`.
 
-   - Visit the [FRED website](https://fred.stlouisfed.org/docs/api/fred/) and get your free API key.
+## Quick start (CLI)
 
+After installation, run:
 
-## Usage
+```bash
+lazy-fred
+```
 
-1. **Configure Search Categories:**
-   - Modify the `search_categories` list in the script to include the categories of interest. The defualt list of 30 items have been chosen from the structure of the FRED website navigation and some personal decisions.
+The CLI is interactive and will prompt you to:
+- add/remove/clear categories
+- run the data collection
 
-2. **Run the Script:**
+Note: because it uses `input()`, it is intended for interactive terminals.
 
-   ```bash
-   python lazy_fred.py
-   ```
+## Output files
 
-3. **Output:**
-   - The script will create three CSV files in your project directory:
-     - `filtered_series.csv`: Contains the search results from FRED cleaned to popularity over 50 and observation starts after 1900.
-     - `daily_data.csv`: Contains daily time series data.
-     - `monthly_data.csv`: Contains monthly time series data.
-     - `weekly_data.csv`: Contains weekly time series data.
+When you choose `run`, the project will generate these CSV files in your current directory:
+- `filtered_series.csv`
+- `daily_data.csv`
+- `weekly_data.csv`
+- `monthly_data.csv`
 
-## Code Structure
+## Programmatic usage
 
-- **`AccessFred` Class:**
-  - Handles API key retrieval and validation.
+```python
+import lazy_fred as lf
 
-- **`collect_categories` Class:**
-  - Executes searches across categories and consolidates results.
+lf.run_fred_data_collection("insert_api_key_here")
+```
 
-- **`daily_export`, `monthly_export`, and `weekly_export` Classes:**
-  - Filter series by frequency and popularity.
-  - Collect and export time series data.
+This will also start the interactive menu (it blocks on `input()`).
 
-## Packaging: pypi.org/project/lazy_fred/
-
-   The code has been packaged and can also be pip installed as 
-
-   ```bash
-   pip install lazy_fred
-   ```
-
-   Make sure you are on the latest version (https://pypi.org/project/lazy_fred/).
-
-## Package Instructions
-
-   The code is simple, create and instance and add your API key!
-
-   ```bash   
-   import lazy_fred as lf
-   lf.run_fred_data_collection("insert_api_key_here")
-   ```
-
-
-
-## Contributions
-
-Contributions are welcome! Feel free to open issues or submit pull requests.
-
-## License
-
-This project is licensed under the MIT License.
+## Development
+- Lint: `poetry run ruff check .`
+- Tests (requires a real key): `API_KEY=<your_key> poetry run pytest`
 
 ## Disclaimer
 
@@ -98,8 +81,13 @@ This library is not affiliated with or endorsed by the Federal Reserve Bank of S
 
 ## Acknowledgments
 
-- This project utilizes the `fredapi` and `fred` libraries for interacting with the FRED API.
+This project utilizes the `fredapi` and `fred` libraries for interacting with the FRED API.
 
-## Contact
+## Contributions
 
-For any questions or feedback, please open an issue in the repository.
+Contributions are welcome. Feel free to open issues or submit pull requests.
+
+## License
+
+MIT
+
