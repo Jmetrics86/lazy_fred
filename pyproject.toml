@@ -5,6 +5,11 @@ description = "'A simplified aggegate of FRED data using fredapi package'"
 authors = ["Jmetrics86 <jsnbrwstr@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+packages = [
+    { include = "lazy_fred.py" },
+    { include = "wizard.py" },
+    { include = "data_store.py" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -21,6 +26,7 @@ pytest = "^8.2.1"
 hypothesis = "^6.103.0"
 
 [tool.poetry.scripts]
+lazy-fred = "lazy_fred:main"
 lazy-fred-wizard = "wizard:main"
 
 [build-system]

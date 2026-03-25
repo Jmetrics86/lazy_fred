@@ -1,26 +1,34 @@
 
-import pandas as pd
 import os
 import tempfile
-from fredapi import Fred
-import fred
-from .lazy_fred import CollectCategories, AccessFred
+
+import pandas as pd
+import pytest
+
+from .lazy_fred import CollectCategories
 
 
+def _fred_api_key() -> str | None:
+    return os.getenv("API_KEY") or os.getenv("FRED_API_KEY")
 
 
-# Unit tests for individual methods/classes
+requires_fred_api = pytest.mark.skipif(
+    not (_fred_api_key() or "").strip(),
+    reason="Set API_KEY or FRED_API_KEY for live FRED API tests",
+)
+
+
+@requires_fred_api
 def test_api_key_validation():
-    # Simulate a valid API key scenario
-    api_key = os.getenv("API_KEY")
-    assert len(api_key) != None
+    key = _fred_api_key()
+    assert key is not None and len(key.strip()) > 0
 
 
-
+@requires_fred_api
 def test_get_fred_search_results():
     """Tests that search results are retrieved and processed correctly."""
 
-    api_key = os.getenv("API_KEY")
+    api_key = _fred_api_key().strip()
 
     collect = CollectCategories(api_key)
     results = collect.get_fred_search(categories=['gdp', 'banking']) #get_fred_search(self, categories)
