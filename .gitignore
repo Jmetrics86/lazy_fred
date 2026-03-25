@@ -3,6 +3,8 @@
 lazy_fred.code-workspace
 app.log
 data.json
+.ci-venv/
+.pkgtest/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
