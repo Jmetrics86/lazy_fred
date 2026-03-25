@@ -33,3 +33,10 @@ jobs:
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          # Digital attestations can sometimes produce opaque 400s.
+          # Disabling them helps confirm the core upload works.
+          attestations: false
+          # Prevent failures if the same version was already uploaded.
+          skip_existing: true
