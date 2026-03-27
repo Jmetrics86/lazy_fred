@@ -1,25 +1,28 @@
 # AGENTS.md
 
-## Cursor Cloud specific instructions
+## Overview
 
-### Overview
+`lazy_fred` is a Python CLI/library for pulling economic time series from the FRED API.
+It is a flat, single-module package managed by Poetry.
 
-`lazy_fred` is a Python library/CLI for automated collection of economic time series from the FRED API. It's a single-module Python package managed by **Poetry**.
-
-### Key commands
+## Current user-facing commands
 
 | Action | Command |
 |---|---|
-| Install deps | `poetry install` |
-| Lint | `poetry run ruff check .` |
-| Run tests | `API_KEY=<your_key> poetry run pytest` |
-| Run script | `API_KEY=<key> poetry run python3 lazy_fred.py` |
-| Use as library | `import lazy_fred as lf; lf.run_fred_data_collection("<API_KEY>")` |
+| Install deps | `poetry install --with dev` |
+| Lint | `poetry run python -m ruff check .` |
+| Run tests | `poetry run pytest -q` |
+| Run doctor | `poetry run lazy-fred doctor` |
+| Quick starter pull | `poetry run lazy-fred quick` |
+| Standard pull | `poetry run lazy-fred standard` |
+| Full pull | `poetry run lazy-fred full` |
+| Favorites | `poetry run lazy-fred favorites macro` |
+| Notebook UI | `import lazy_fred as lf; lf.launch_notebook_ui("<API_KEY>")` |
 
-### Important notes
+## Important notes
 
-- **FRED API key required**: Tests (`test_lazy_fred.py`) make real API calls to FRED. Set `API_KEY` as an environment variable. Without it, 2 of 3 tests will fail.
-- **Interactive prompts**: `run_fred_data_collection()` uses `input()` for menu-driven interaction. When running from a non-interactive context, this will block. The main script is not suitable for automated/background execution without modification.
-- **Module structure**: The package is a flat single-file module (`lazy_fred.py` + `__init__.py` at root). When Poetry-installed, `import lazy_fred` loads `lazy_fred.py` directly (not a package directory). The test file uses `from .lazy_fred import ...` (relative import) which works under pytest but not standalone.
-- **Poetry path**: Poetry installs to `~/.local/bin`. Ensure `PATH` includes `$HOME/.local/bin`.
-- **Pre-existing lint issues**: `ruff check .` reports 4 warnings in `test_lazy_fred.py` (unused imports, `None` comparison). These are in the existing codebase.
+- Live FRED tests in `test_lazy_fred.py` need `API_KEY` (or `FRED_API_KEY`).
+- CLI supports start-date selection for pulls and uses exponential backoff retries.
+- Existing CSV outputs are auto-backed up to `backups/<timestamp>/` before overwrite.
+- PyPI publishing uses GitHub Actions (`publish-pypi.yml`) with Trusted Publishing OIDC.
+

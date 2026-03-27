@@ -22,6 +22,15 @@ sleep = 0.5
 searchlimit = 1000 # 1000 is max
 AVG_SEARCH_SECONDS_PER_CATEGORY = 1.0
 AVG_PULL_SECONDS_PER_SERIES = 1.2
+DEFAULT_MAX_RETRIES = 6
+DEFAULT_INITIAL_BACKOFF_SECONDS = 1.0
+FREQUENCY_LABELS = {
+    "D": "daily",
+    "W": "weekly",
+    "M": "monthly",
+    "Q": "quarterly",
+    "A": "annual",
+}
 #search_categories = ['Interest Rates', 'Exchange Rates'] #this one is for quick testing
 DEFAULT_SEARCH_CATEGORIES = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry','gdp' , 'banking', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
 search_categories = DEFAULT_SEARCH_CATEGORIES.copy()
@@ -74,6 +83,50 @@ def format_duration(seconds):
     return f"{sec}s"
 
 
+def is_retryable_exception(exc):
+    text = str(exc).lower()
+    retry_markers = [
+        "429",
+        "too many requests",
+        "rate limit",
+        "503",
+        "502",
+        "504",
+        "timeout",
+        "temporarily unavailable",
+    ]
+    return any(marker in text for marker in retry_markers)
+
+
+def backoff_sleep(attempt, initial_wait=DEFAULT_INITIAL_BACKOFF_SECONDS):
+    wait_time = initial_wait * (2 ** attempt)
+    console.print(f"[yellow]Retrying in {wait_time:.1f}s...[/yellow]")
+    time.sleep(wait_time)
+
+
+def parse_start_date(value):
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    try:
+        datetime.datetime.strptime(value, "%Y-%m-%d")
+        return value
+    except ValueError:
+        raise ValueError("Start date must be YYYY-MM-DD")
+
+
+def prompt_start_date():
+    raw = Prompt.ask(
+        "Start date filter (YYYY-MM-DD, leave blank for full history)",
+        default="",
+    ).strip()
+    if not raw:
+        return None
+    return parse_start_date(raw)
+
+
 def resolve_categories(user_categories):
     """Resolve user-provided category text against default categories."""
     resolved = []
@@ -103,7 +156,7 @@ def resolve_categories(user_categories):
     return deduped
 
 
-def execute_collection(api_key, categories_to_use):
+def execute_collection(api_key, categories_to_use, observation_start=None):
     backup_existing_outputs()
     collector = CollectCategories(api_key)
     console.print(Panel("Collecting search results from FRED...", border_style="cyan"))
@@ -113,17 +166,17 @@ def execute_collection(api_key, categories_to_use):
     console.print(Panel("Pulling daily data...", border_style="cyan"))
     daily_exporter = daily_export(Fred(api_key=api_key))
     daily_exporter.dailyfilter()
-    daily_exporter.daily_series_collector()
+    daily_exporter.daily_series_collector(observation_start=observation_start)
 
     console.print(Panel("Pulling monthly data...", border_style="cyan"))
     monthly_exporter = monthly_export(Fred(api_key=api_key))
     monthly_exporter.monthlyfilter()
-    monthly_exporter.monthly_series_collector()
+    monthly_exporter.monthly_series_collector(observation_start=observation_start)
 
     console.print(Panel("Pulling weekly data...", border_style="cyan"))
     weekly_exporter = weekly_export(Fred(api_key=api_key))
     weekly_exporter.weeklyfilter()
-    weekly_exporter.weekly_series_collector()
+    weekly_exporter.weekly_series_collector(observation_start=observation_start)
 
     output_table = Table(title="Run complete - output files")
     output_table.add_column("File", style="green")
@@ -135,7 +188,7 @@ def execute_collection(api_key, categories_to_use):
 
 
 def build_series_metadata_map(path="filtered_series.csv"):
-    """Return {series_id: {'title': str, 'popularity': int|None}}."""
+    """Return metadata by series ID for richer progress output."""
     try:
         df = pd.read_csv(path)
     except Exception:
@@ -150,13 +203,53 @@ def build_series_metadata_map(path="filtered_series.csv"):
         if not series_id:
             continue
         title = str(row.get("title", "")).strip()
+        frequency_short = str(row.get("frequency_short", "")).strip()
+        units_short = str(row.get("units_short", "")).strip()
+        seasonal_adjustment_short = str(row.get("seasonal_adjustment_short", "")).strip()
         popularity = row.get("popularity")
         try:
             popularity = int(popularity)
         except Exception:
             popularity = None
-        meta[series_id] = {"title": title, "popularity": popularity}
+        meta[series_id] = {
+            "title": title,
+            "popularity": popularity,
+            "frequency_short": frequency_short,
+            "units_short": units_short,
+            "seasonal_adjustment_short": seasonal_adjustment_short,
+        }
     return meta
+
+
+def build_series_insight(meta):
+    """Generate a short plain-language insight for a series."""
+    title = (meta.get("title") or "").lower()
+    units = meta.get("units_short") or ""
+    freq = meta.get("frequency_short") or ""
+    freq_label = FREQUENCY_LABELS.get(freq, "periodic")
+
+    if "unemployment" in title:
+        meaning = "tracks labor market slack"
+    elif "gdp" in title:
+        meaning = "tracks overall economic growth"
+    elif "consumer price" in title or "cpi" in title or "inflation" in title:
+        meaning = "tracks inflation pressure"
+    elif "federal funds" in title or "treasury" in title or "interest" in title:
+        meaning = "tracks borrowing cost trends"
+    elif "housing" in title or "home price" in title or "mortgage" in title:
+        meaning = "tracks housing market conditions"
+    elif "retail" in title:
+        meaning = "tracks consumer demand"
+    elif "payroll" in title or "employment" in title:
+        meaning = "tracks job market activity"
+    elif "exchange rate" in title or "usd" in title:
+        meaning = "tracks currency market movement"
+    else:
+        meaning = "tracks an economic trend"
+
+    if units:
+        return f"{meaning}; reported {freq_label} in {units}"
+    return f"{meaning}; reported {freq_label}"
 
 
 def backup_existing_outputs():
@@ -323,7 +416,19 @@ class CollectCategories:
         )
         start = time.time()
         for index, category in enumerate(categories, start=1):
-            search_results = fred.search(category)
+            search_results = None
+            for attempt in range(DEFAULT_MAX_RETRIES):
+                try:
+                    search_results = fred.search(category)
+                    break
+                except Exception as exc:
+                    if is_retryable_exception(exc) and attempt < DEFAULT_MAX_RETRIES - 1:
+                        backoff_sleep(attempt)
+                        continue
+                    logger.error(f"Search failed for category '{category}': {exc}")
+                    break
+            if search_results is None:
+                continue
             search_dict.append(search_results)
             time.sleep(sleep)
             elapsed = time.time() - start
@@ -370,7 +475,7 @@ class daily_export:
         daily_list = filtered_df['id'].tolist()
         return daily_list
 
-    def daily_series_collector(self):
+    def daily_series_collector(self, observation_start=None):
         fred = Fred(api_key=os.getenv("API_KEY")) 
 
         merged_data = pd.DataFrame()
@@ -386,44 +491,39 @@ class daily_export:
             )
         )
         phase_start = time.time()
-        max_retries = 5  # Maximum number of retry attempts
-        retry_count = 0  # Current retry count
-        initial_wait_time = 0.2  # Initial wait time in seconds
-
         for index, series_id in enumerate(series_list, start=1):
-            while retry_count < max_retries:
+            for attempt in range(DEFAULT_MAX_RETRIES):
                 try:
-                    data = pd.DataFrame(fred.get_series(series_id))
+                    kwargs = {}
+                    if observation_start:
+                        kwargs["observation_start"] = observation_start
+                    data = pd.DataFrame(fred.get_series(series_id, **kwargs))
                     data['series'] = series_id
                     merged_data = pd.concat([merged_data, data], axis=0)
                     meta = series_meta.get(series_id, {})
                     title = meta.get("title") or "Unknown series"
                     popularity = meta.get("popularity")
                     pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
+                    insight = build_series_insight(meta)
+                    freq_label = FREQUENCY_LABELS.get(meta.get("frequency_short"), "periodic")
                     elapsed = time.time() - phase_start
                     avg_so_far = elapsed / index
                     eta = max((total_series - index) * avg_so_far, 0)
                     console.print(
                         f"[green]{series_id}[/green] ({index}/{total_series}) | "
-                        f"{title} | {pop_text} | "
+                        f"{title} | {freq_label} | {pop_text} | "
+                        f"[dim]{insight}[/dim] | "
                         f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
                     )
                     time.sleep(sleep)
-                    retry_count = 0 # Reset retry count for the next series
                     break  # Break out of the retry loop if successful
 
                 except Exception as e:
-                    if e.args[0][0] == 429:
-                        wait_time = initial_wait_time * 2 ** retry_count
-                        print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
-                        retry_count += 1
-                    else:
-                        logger.error(f"Error fetching series {series_id}: {e}")
-                        break
-            else:
-                logger.error(f"Max retries reached for series {series_id}. Skipping.")
-                retry_count = 0 # Reset retry count for the next series
+                    if is_retryable_exception(e) and attempt < DEFAULT_MAX_RETRIES - 1:
+                        backoff_sleep(attempt)
+                        continue
+                    logger.error(f"Error fetching series {series_id}: {e}")
+                    break
             
 
         merged_data = merged_data.reset_index()
@@ -451,7 +551,7 @@ class monthly_export:
 
 
 
-    def monthly_series_collector(self):
+    def monthly_series_collector(self, observation_start=None):
         monthly_merged_data = pd.DataFrame()
         series_meta = build_series_metadata_map()
         series_list = monthly_export.monthlyfilter(self)
@@ -465,45 +565,42 @@ class monthly_export:
             )
         )
         phase_start = time.time()
-        max_retries = 5  # Maximum number of retry attempts
-        retry_count = 0  # Current retry count
-        initial_wait_time = 0.2  # Initial wait time in seconds
         fred = Fred(api_key=os.getenv("API_KEY")) 
 
 
         for index, series_id in enumerate(series_list, start=1):
-            while retry_count < max_retries:
+            for attempt in range(DEFAULT_MAX_RETRIES):
                 try:
-                    data = pd.DataFrame(fred.get_series(series_id))
+                    kwargs = {}
+                    if observation_start:
+                        kwargs["observation_start"] = observation_start
+                    data = pd.DataFrame(fred.get_series(series_id, **kwargs))
                     data['series'] = series_id
                     monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)  # Update merged data
                     meta = series_meta.get(series_id, {})
                     title = meta.get("title") or "Unknown series"
                     popularity = meta.get("popularity")
                     pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
+                    insight = build_series_insight(meta)
+                    freq_label = FREQUENCY_LABELS.get(meta.get("frequency_short"), "periodic")
                     elapsed = time.time() - phase_start
                     avg_so_far = elapsed / index
                     eta = max((total_series - index) * avg_so_far, 0)
                     console.print(
                         f"[green]{series_id}[/green] ({index}/{total_series}) | "
-                        f"{title} | {pop_text} | "
+                        f"{title} | {freq_label} | {pop_text} | "
+                        f"[dim]{insight}[/dim] | "
                         f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
                     )
                     time.sleep(sleep)
-                    retry_count = 0 # Reset retry count for the next series
                     break  # Break out of the retry loop if successful
 
                 except Exception as e:
-                    if e.args[0][0] == 429:
-                        wait_time = initial_wait_time * 2 ** retry_count
-                        print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
-                        retry_count += 1
-                    else:
-                        logger.error(f"Error fetching series {series_id}: {e}")
-                        break
-            else:
-                logger.error(f"Max retries reached for series {series_id}. Skipping.")
+                    if is_retryable_exception(e) and attempt < DEFAULT_MAX_RETRIES - 1:
+                        backoff_sleep(attempt)
+                        continue
+                    logger.error(f"Error fetching series {series_id}: {e}")
+                    break
 
 
         monthly_merged_data = monthly_merged_data.reset_index()
@@ -533,7 +630,7 @@ class weekly_export:
         return weekly_list
 
         
-    def weekly_series_collector(self):
+    def weekly_series_collector(self, observation_start=None):
         weekly_merged_data = pd.DataFrame()
         series_meta = build_series_metadata_map()
         series_list = weekly_export.weeklyfilter(self)
@@ -547,45 +644,42 @@ class weekly_export:
             )
         )
         phase_start = time.time()
-        max_retries = 5  # Maximum number of retry attempts
-        retry_count = 0  # Current retry count
-        initial_wait_time = 0.2  # Initial wait time in seconds
         fred = Fred(api_key=os.getenv("API_KEY")) 
 
 
         for index, series_id in enumerate(series_list, start=1):
-            while retry_count < max_retries:
+            for attempt in range(DEFAULT_MAX_RETRIES):
                 try:
-                    data = pd.DataFrame(fred.get_series(series_id))
+                    kwargs = {}
+                    if observation_start:
+                        kwargs["observation_start"] = observation_start
+                    data = pd.DataFrame(fred.get_series(series_id, **kwargs))
                     data['series'] = series_id
                     weekly_merged_data = pd.concat([weekly_merged_data, data], axis=0)  # Update merged data
                     meta = series_meta.get(series_id, {})
                     title = meta.get("title") or "Unknown series"
                     popularity = meta.get("popularity")
                     pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
+                    insight = build_series_insight(meta)
+                    freq_label = FREQUENCY_LABELS.get(meta.get("frequency_short"), "periodic")
                     elapsed = time.time() - phase_start
                     avg_so_far = elapsed / index
                     eta = max((total_series - index) * avg_so_far, 0)
                     console.print(
                         f"[green]{series_id}[/green] ({index}/{total_series}) | "
-                        f"{title} | {pop_text} | "
+                        f"{title} | {freq_label} | {pop_text} | "
+                        f"[dim]{insight}[/dim] | "
                         f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
                     )
                     time.sleep(sleep)
-                    retry_count = 0 # Reset retry count for the next series
                     break  # Break out of the retry loop if successful
 
                 except Exception as e:
-                    if e.args[0][0] == 429:
-                        wait_time = initial_wait_time * 2 ** retry_count
-                        print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
-                        retry_count += 1
-                    else:
-                        logger.error(f"Error fetching series {series_id}: {e}")
-                        break
-            else: # The else statement is executed if the while loop completes normally, meaning the max number of retries was reached
-                logger.error(f"Max retries reached for series {series_id}. Skipping.")
+                    if is_retryable_exception(e) and attempt < DEFAULT_MAX_RETRIES - 1:
+                        backoff_sleep(attempt)
+                        continue
+                    logger.error(f"Error fetching series {series_id}: {e}")
+                    break
 
         weekly_merged_data = weekly_merged_data.reset_index()
         weekly_merged_data = weekly_merged_data.rename(columns={'index': 'date', 0: 'value'})
@@ -599,7 +693,7 @@ class weekly_export:
         )
 
 
-def run_fred_data_collection(api_key, categories=None, interactive=True):
+def run_fred_data_collection(api_key, categories=None, interactive=True, observation_start=None):
     console.print(Panel("Welcome to [bold]lazy_fred[/bold]\nLet's collect FRED data.", title="Starting collection process"))
     load_dotenv()
     # Resolve API key from function arg, then environment, then prompt.
@@ -629,9 +723,11 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
         if not categories_to_use:
             console.print("[red]No valid categories provided.[/red]")
             return
+        if observation_start:
+            observation_start = parse_start_date(observation_start)
         console.print("[green]Running non-interactive collection with selected categories.[/green]")
         console.print(render_categories_table(categories_to_use))
-        execute_collection(api_key, categories_to_use)
+        execute_collection(api_key, categories_to_use, observation_start=observation_start)
         return
 
     if not interactive:
@@ -689,14 +785,16 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
             console.print("[green]Reset to default categories.[/green]")
         elif action == "run-all":
             reset_search_categories()
+            observation_start = prompt_start_date()
             console.print(f"[green]Running all default categories ({len(search_categories)}).[/green]")
-            execute_collection(api_key, search_categories)
+            execute_collection(api_key, search_categories, observation_start=observation_start)
             break
         elif action == 'run':
             if not search_categories:
                 console.print("[red]Cannot run with no categories. Add at least one first.[/red]")
                 continue
-            execute_collection(api_key, search_categories)
+            observation_start = prompt_start_date()
+            execute_collection(api_key, search_categories, observation_start=observation_start)
             break  # Exit the loop after running
         elif action == 'q':
             console.print("[yellow]Exiting lazy_fred.[/yellow]")
@@ -756,6 +854,10 @@ def launch_notebook_ui(api_key=None):
         rows=12,
         layout=widgets.Layout(width="600px"),
     )
+    start_date_picker = widgets.DatePicker(
+        description="Start date:",
+        disabled=False,
+    )
     run_button = widgets.Button(
         description="Run collection",
         button_style="success",
@@ -779,10 +881,14 @@ def launch_notebook_ui(api_key=None):
             if not chosen_categories:
                 print("Please select at least one category.")
                 return
+            start_date = None
+            if start_date_picker.value:
+                start_date = start_date_picker.value.isoformat()
             run_fred_data_collection(
                 chosen_key,
                 categories=chosen_categories,
                 interactive=False,
+                observation_start=start_date,
             )
 
     def _run_all_defaults(_):
@@ -792,10 +898,14 @@ def launch_notebook_ui(api_key=None):
             if not chosen_key:
                 print("Please enter API key.")
                 return
+            start_date = None
+            if start_date_picker.value:
+                start_date = start_date_picker.value.isoformat()
             run_fred_data_collection(
                 chosen_key,
                 categories=DEFAULT_SEARCH_CATEGORIES,
                 interactive=False,
+                observation_start=start_date,
             )
 
     run_button.on_click(_run_with_selected)
@@ -809,7 +919,13 @@ def launch_notebook_ui(api_key=None):
                     "<p>Select categories and run collection. "
                     "Output CSV files are written to the current working directory.</p>"
                 ),
+                widgets.HTML(
+                    "<p><b>Series insight:</b> during pull, each row shows ID, title, frequency, "
+                    "popularity, and a plain-language meaning (for example: inflation pressure, "
+                    "labor market slack, borrowing cost trends).</p>"
+                ),
                 api_key_input,
+                start_date_picker,
                 categories_select,
                 widgets.HBox([run_button, run_all_button]),
                 output,

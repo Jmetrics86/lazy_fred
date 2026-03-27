@@ -62,10 +62,13 @@ jobs:
       - name: Install Poetry
         run: |
           python -m pip install --upgrade pip
-          pip install "poetry<3" twine
+          pip install "poetry<3"
 
       - name: Build package (sdist + wheel)
         run: poetry build
 
-      - name: Check package metadata and long description
-        run: python -m twine check dist/*
+      - name: Smoke test wheel install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python -c "import lazy_fred; print('import-ok')"
