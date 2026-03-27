@@ -638,7 +638,6 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
         console.print("[red]interactive=False requires categories=[...][/red]")
         return
 
-    collector = CollectCategories(api_key)
     while True:
         console.print(render_categories_table())
         console.print(render_menu())
