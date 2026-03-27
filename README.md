@@ -148,6 +148,30 @@ lf.run_fred_data_collection("insert_api_key_here")
 
 This will also start the interactive menu (it blocks on `input()`).
 
+### Notebook/Colab UI (new)
+
+If you want a clickable UI in Google Colab/Jupyter (instead of typing menu commands):
+
+```python
+!pip install -U lazy_fred ipywidgets
+```
+
+```python
+import lazy_fred as lf
+lf.launch_notebook_ui("YOUR_FRED_API_KEY")
+```
+
+This opens a widget UI where you can:
+- select categories from a list
+- click "Run collection" for selected categories
+- click "Run all defaults" to pull the full default dataset
+
+### Terminal power-user shortcuts
+
+Inside the TUI menu:
+- `rs` = reset categories to defaults
+- `run-all` = reset to defaults and run everything immediately
+
 ## Development
 - Lint: `poetry run ruff check .`
 - Tests (requires a real key): `API_KEY=<your_key> poetry run pytest`

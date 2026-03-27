@@ -19,7 +19,8 @@ console = Console()
 sleep = 0.5
 searchlimit = 1000 # 1000 is max
 #search_categories = ['Interest Rates', 'Exchange Rates'] #this one is for quick testing
-search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry','gdp' , 'banking', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
+DEFAULT_SEARCH_CATEGORIES = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry','gdp' , 'banking', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
+search_categories = DEFAULT_SEARCH_CATEGORIES.copy()
 
 
 def render_categories_table():
@@ -37,7 +38,9 @@ def render_menu():
         "[cyan]a[/cyan] = add category\n"
         "[cyan]r[/cyan] = remove category (by number or name)\n"
         "[cyan]c[/cyan] = clear all categories\n"
+        "[cyan]rs[/cyan] = reset to default categories\n"
         "[cyan]run[/cyan] = start data collection\n"
+        "[cyan]run-all[/cyan] = reset + run all default categories\n"
         "[cyan]q[/cyan] = quit",
         title="lazy_fred menu",
         border_style="blue",
@@ -123,6 +126,13 @@ def clear_search_categories():
     """Clears all categories from the search_categories list."""
     search_categories.clear()
     logger.info("Cleared all search categories.")
+
+
+def reset_search_categories():
+    """Resets categories to default values."""
+    search_categories.clear()
+    search_categories.extend(DEFAULT_SEARCH_CATEGORIES)
+    logger.info("Reset search categories to defaults.")
 
 class AccessFred:
     def set_api_key_in_environment(self):
@@ -415,6 +425,10 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
             action = "r"
         elif action == "clear":
             action = "c"
+        elif action in ("reset", "rs"):
+            action = "rs"
+        elif action in ("runall", "run-all", "all"):
+            action = "run-all"
         elif action == "quit":
             action = "q"
 
@@ -447,6 +461,14 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
         elif action == 'c':
             clear_search_categories()
             console.print("[yellow]All categories cleared.[/yellow]")
+        elif action == "rs":
+            reset_search_categories()
+            console.print("[green]Reset to default categories.[/green]")
+        elif action == "run-all":
+            reset_search_categories()
+            console.print(f"[green]Running all default categories ({len(search_categories)}).[/green]")
+            execute_collection(api_key, search_categories)
+            break
         elif action == 'run':
             if not search_categories:
                 console.print("[red]Cannot run with no categories. Add at least one first.[/red]")
@@ -461,6 +483,99 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
 
 def main():
     run_fred_data_collection(os.getenv("API_KEY"))
+
+
+def launch_notebook_ui(api_key=None):
+    """
+    Launch an interactive widget UI for Jupyter/Colab users.
+
+    Example:
+        import lazy_fred as lf
+        lf.launch_notebook_ui("YOUR_API_KEY")
+    """
+    try:
+        import ipywidgets as widgets
+        from IPython.display import display, clear_output
+    except Exception:
+        raise ImportError(
+            "Notebook UI requires ipywidgets. Install with: pip install ipywidgets"
+        )
+
+    if not api_key:
+        api_key = os.getenv("API_KEY")
+
+    api_key_input = widgets.Password(
+        value=api_key or "",
+        description="API Key:",
+        layout=widgets.Layout(width="600px"),
+    )
+    categories_select = widgets.SelectMultiple(
+        options=DEFAULT_SEARCH_CATEGORIES,
+        value=("interest rates", "retail trade", "housing"),
+        description="Categories:",
+        rows=12,
+        layout=widgets.Layout(width="600px"),
+    )
+    run_button = widgets.Button(
+        description="Run collection",
+        button_style="success",
+        icon="play",
+    )
+    run_all_button = widgets.Button(
+        description="Run all defaults",
+        button_style="info",
+        icon="database",
+    )
+    output = widgets.Output()
+
+    def _run_with_selected(_):
+        with output:
+            clear_output(wait=True)
+            chosen_key = api_key_input.value.strip()
+            if not chosen_key:
+                print("Please enter API key.")
+                return
+            chosen_categories = list(categories_select.value)
+            if not chosen_categories:
+                print("Please select at least one category.")
+                return
+            run_fred_data_collection(
+                chosen_key,
+                categories=chosen_categories,
+                interactive=False,
+            )
+
+    def _run_all_defaults(_):
+        with output:
+            clear_output(wait=True)
+            chosen_key = api_key_input.value.strip()
+            if not chosen_key:
+                print("Please enter API key.")
+                return
+            run_fred_data_collection(
+                chosen_key,
+                categories=DEFAULT_SEARCH_CATEGORIES,
+                interactive=False,
+            )
+
+    run_button.on_click(_run_with_selected)
+    run_all_button.on_click(_run_all_defaults)
+
+    display(
+        widgets.VBox(
+            [
+                widgets.HTML("<h3>lazy_fred Notebook UI</h3>"),
+                widgets.HTML(
+                    "<p>Select categories and run collection. "
+                    "Output CSV files are written to the current working directory.</p>"
+                ),
+                api_key_input,
+                categories_select,
+                widgets.HBox([run_button, run_all_button]),
+                output,
+            ]
+        )
+    )
 
 if __name__ == "__main__":
     main()
