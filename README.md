@@ -41,7 +41,7 @@ If `API_KEY` is missing, the CLI will prompt you for it and write it to `.env`.
 
 ## Quick start (CLI)
 
-After installation, run:
+After installation, run one of these:
 
 ```bash
 lazy-fred
@@ -49,11 +49,23 @@ lazy-fred
 lazy_fred
 ```
 
-The CLI is interactive and will prompt you to:
-- add/remove/clear categories
-- run the data collection
+Then type:
+- `run-all` to pull all default categories, or
+- `run` to use your current selected categories.
 
-Note: because it uses `input()`, it is intended for interactive terminals.
+## Quick start (Colab/Jupyter UI)
+
+Use this if you want buttons instead of terminal prompts:
+
+```python
+!pip install -U lazy_fred ipywidgets
+import lazy_fred as lf
+lf.launch_notebook_ui("YOUR_FRED_API_KEY")
+```
+
+In the UI:
+- select categories and click **Run collection**, or
+- click **Run all defaults**.
 
 ## Beginner guide (step-by-step)
 
@@ -148,23 +160,34 @@ lf.run_fred_data_collection("insert_api_key_here")
 
 This will also start the interactive menu (it blocks on `input()`).
 
-### Notebook/Colab UI (new)
+### Favorite quick-run commands (most popular themes)
 
-If you want a clickable UI in Google Colab/Jupyter (instead of typing menu commands):
-
-```python
-!pip install -U lazy_fred ipywidgets
-```
+Use these to pull popular groups quickly without menu prompts:
 
 ```python
 import lazy_fred as lf
-lf.launch_notebook_ui("YOUR_FRED_API_KEY")
+
+api_key = "YOUR_FRED_API_KEY"
+lf.run_favorites(api_key, "macro")    # GDP, inflation, unemployment, rates
 ```
 
-This opens a widget UI where you can:
-- select categories from a list
-- click "Run collection" for selected categories
-- click "Run all defaults" to pull the full default dataset
+Other profiles:
+
+```python
+lf.run_favorites(api_key, "rates")    # rates + FX + monetary
+lf.run_favorites(api_key, "labor")    # employment + openings + income
+lf.run_favorites(api_key, "markets")  # financial + banking + housing + retail
+```
+
+If you want custom categories:
+
+```python
+lf.run_fred_data_collection(
+    api_key,
+    categories=["gdp", "unemployment", "retail trade"],
+    interactive=False
+)
+```
 
 ### Terminal power-user shortcuts
 

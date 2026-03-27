@@ -21,13 +21,20 @@ searchlimit = 1000 # 1000 is max
 #search_categories = ['Interest Rates', 'Exchange Rates'] #this one is for quick testing
 DEFAULT_SEARCH_CATEGORIES = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry','gdp' , 'banking', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
 search_categories = DEFAULT_SEARCH_CATEGORIES.copy()
+FAVORITE_PROFILES = {
+    "macro": ["gdp", "inflation", "unemployment", "interest rates"],
+    "rates": ["interest rates", "exchange rates", "monetary data"],
+    "labor": ["employment", "job opening", "labor turnover", "income"],
+    "markets": ["financial indicator", "banking", "housing", "retail trade"],
+}
 
 
-def render_categories_table():
+def render_categories_table(categories=None):
+    categories = categories if categories is not None else search_categories
     table = Table(title="Current Search Categories")
     table.add_column("#", style="cyan", justify="right")
     table.add_column("Category", style="green")
-    for idx, category in enumerate(search_categories, start=1):
+    for idx, category in enumerate(categories, start=1):
         table.add_row(str(idx), category)
     return table
 
@@ -50,7 +57,7 @@ def render_menu():
 def resolve_categories(user_categories):
     """Resolve user-provided category text against default categories."""
     resolved = []
-    default_lookup = {c.lower(): c for c in search_categories}
+    default_lookup = {c.lower(): c for c in DEFAULT_SEARCH_CATEGORIES}
 
     for raw in user_categories:
         query = str(raw).strip().lower()
@@ -61,7 +68,7 @@ def resolve_categories(user_categories):
             resolved.append(default_lookup[query])
             continue
 
-        matches = [c for c in search_categories if query in c.lower()]
+        matches = [c for c in DEFAULT_SEARCH_CATEGORIES if query in c.lower()]
         if len(matches) == 1:
             console.print(f"[cyan]Mapped '{raw}' -> '{matches[0]}'[/cyan]")
             resolved.append(matches[0])
@@ -168,7 +175,7 @@ class CollectCategories:
     def get_fredapi_search_results(self, categories, searchlimit=1000):
         df_list = []
         total_categories = len(categories)
-        for index, category in categories:
+        for index, category in enumerate(categories, start=1):
             search_results = self.fredapi.search(category, order_by='popularity', sort_order='desc', limit=searchlimit)
             df_list.append(pd.DataFrame(search_results))
             time.sleep(sleep)
@@ -406,7 +413,7 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
             console.print("[red]No valid categories provided.[/red]")
             return
         console.print("[green]Running non-interactive collection with selected categories.[/green]")
-        console.print(render_categories_table())
+        console.print(render_categories_table(categories_to_use))
         execute_collection(api_key, categories_to_use)
         return
 
@@ -575,6 +582,23 @@ def launch_notebook_ui(api_key=None):
                 output,
             ]
         )
+    )
+
+
+def run_favorites(api_key=None, profile="macro"):
+    """
+    Run a beginner-friendly, non-interactive collection for popular themes.
+
+    Profiles: macro, rates, labor, markets
+    """
+    key = (profile or "").strip().lower()
+    if key not in FAVORITE_PROFILES:
+        valid = ", ".join(sorted(FAVORITE_PROFILES.keys()))
+        raise ValueError(f"Unknown profile '{profile}'. Use one of: {valid}")
+    return run_fred_data_collection(
+        api_key,
+        categories=FAVORITE_PROFILES[key],
+        interactive=False,
     )
 
 if __name__ == "__main__":
