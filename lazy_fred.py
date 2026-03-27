@@ -7,14 +7,100 @@ import datetime
 import os
 from dotenv import load_dotenv, set_key
 import json
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
+from rich.table import Table
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+console = Console()
 
 sleep = 0.5
 searchlimit = 1000 # 1000 is max
 #search_categories = ['Interest Rates', 'Exchange Rates'] #this one is for quick testing
 search_categories = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry','gdp' , 'banking', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
+
+
+def render_categories_table():
+    table = Table(title="Current Search Categories")
+    table.add_column("#", style="cyan", justify="right")
+    table.add_column("Category", style="green")
+    for idx, category in enumerate(search_categories, start=1):
+        table.add_row(str(idx), category)
+    return table
+
+
+def render_menu():
+    return Panel(
+        "[bold]Choose an action:[/bold]\n"
+        "[cyan]a[/cyan] = add category\n"
+        "[cyan]r[/cyan] = remove category (by number or name)\n"
+        "[cyan]c[/cyan] = clear all categories\n"
+        "[cyan]run[/cyan] = start data collection\n"
+        "[cyan]q[/cyan] = quit",
+        title="lazy_fred menu",
+        border_style="blue",
+    )
+
+
+def resolve_categories(user_categories):
+    """Resolve user-provided category text against default categories."""
+    resolved = []
+    default_lookup = {c.lower(): c for c in search_categories}
+
+    for raw in user_categories:
+        query = str(raw).strip().lower()
+        if not query:
+            continue
+
+        if query in default_lookup:
+            resolved.append(default_lookup[query])
+            continue
+
+        matches = [c for c in search_categories if query in c.lower()]
+        if len(matches) == 1:
+            console.print(f"[cyan]Mapped '{raw}' -> '{matches[0]}'[/cyan]")
+            resolved.append(matches[0])
+        elif len(matches) > 1:
+            console.print(f"[yellow]'{raw}' matched multiple categories; using '{matches[0]}'.[/yellow]")
+            resolved.append(matches[0])
+        else:
+            console.print(f"[yellow]No default match for '{raw}'. Using it as-is.[/yellow]")
+            resolved.append(str(raw).strip())
+
+    deduped = list(dict.fromkeys(resolved))
+    return deduped
+
+
+def execute_collection(api_key, categories_to_use):
+    collector = CollectCategories(api_key)
+    console.print(Panel("Collecting search results from FRED...", border_style="cyan"))
+    search_results = collector.get_fred_search(categories_to_use)
+    collector.export_master(search_results)
+
+    console.print(Panel("Pulling daily data...", border_style="cyan"))
+    daily_exporter = daily_export(Fred(api_key=api_key))
+    daily_exporter.dailyfilter()
+    daily_exporter.daily_series_collector()
+
+    console.print(Panel("Pulling monthly data...", border_style="cyan"))
+    monthly_exporter = monthly_export(Fred(api_key=api_key))
+    monthly_exporter.monthlyfilter()
+    monthly_exporter.monthly_series_collector()
+
+    console.print(Panel("Pulling weekly data...", border_style="cyan"))
+    weekly_exporter = weekly_export(Fred(api_key=api_key))
+    weekly_exporter.weeklyfilter()
+    weekly_exporter.weekly_series_collector()
+
+    output_table = Table(title="Run complete - output files")
+    output_table.add_column("File", style="green")
+    output_table.add_row("filtered_series.csv")
+    output_table.add_row("daily_data.csv")
+    output_table.add_row("monthly_data.csv")
+    output_table.add_row("weekly_data.csv")
+    console.print(output_table)
 
 
 def add_search_category(category):
@@ -66,6 +152,7 @@ class AccessFred:
 
 class CollectCategories:
     def __init__(self, api_key):
+        self.api_key = api_key
         self.fredapi = Fred(api_key=api_key)
 
     def get_fredapi_search_results(self, categories, searchlimit=1000):
@@ -91,15 +178,16 @@ class CollectCategories:
             return json.load(file)
     
     def get_fred_search(self, categories):
-        load_dotenv()
-        fred.key(os.getenv("API_KEY"))
+        if not self.api_key:
+            raise ValueError("API_KEY is required.")
+        fred.key(self.api_key)
         search_dict = []
         total_categories = len(categories)
         for index, category in enumerate(categories, start=1):
             search_results = fred.search(category)
             search_dict.append(search_results)
             time.sleep(sleep)
-            print(f"Processing {category} ({index}/{total_categories})", flush=True)  # Updated f-string
+            console.print(f"[dim]Processing {category} ({index}/{total_categories})[/dim]", soft_wrap=True)
         CollectCategories.save_dict_to_json(search_dict)
         return search_dict
 
@@ -277,67 +365,99 @@ class weekly_export:
         print("weekly series completed!")
 
 
-def run_fred_data_collection(api_key):
-    print("""starting collection process
-    """)
+def run_fred_data_collection(api_key, categories=None, interactive=True):
+    console.print(Panel("Welcome to [bold]lazy_fred[/bold]\nLet's collect FRED data.", title="Starting collection process"))
     load_dotenv()
+    # Resolve API key from function arg, then environment, then prompt.
+    if not api_key:
+        api_key = os.getenv("API_KEY")
+    if not api_key:
+        api_key = Prompt.ask("API_KEY not found in environment. Please enter your API key").strip()
+    if not api_key:
+        logger.error("No API key provided. Exiting.")
+        return
+
+    os.environ["API_KEY"] = api_key
     set_key(".env", "API_KEY", api_key)
 
     try:
-        fred = Fred(api_key=api_key)
-        fred.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
+        fred_client = Fred(api_key=api_key)
+        fred_client.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
         logger.info("API key is valid!")
-        
+        console.print("[green]API key validated.[/green]")
     except Exception:
         logger.error("Invalid API key provided. Please check and try again.")
+        console.print("[red]Invalid API key provided. Please check and try again.[/red]")
         return  # Exit if the API key is invalid
     
+    if categories:
+        categories_to_use = resolve_categories(categories)
+        if not categories_to_use:
+            console.print("[red]No valid categories provided.[/red]")
+            return
+        console.print("[green]Running non-interactive collection with selected categories.[/green]")
+        console.print(render_categories_table())
+        execute_collection(api_key, categories_to_use)
+        return
+
+    if not interactive:
+        console.print("[red]interactive=False requires categories=[...][/red]")
+        return
+
     collector = CollectCategories(api_key)
     while True:
-        action = input(
-            "Do you want to add (a), remove (r), clear (c) categories, or run (run) the data collection? (q to quit): "
-        ).lower()
+        console.print(render_categories_table())
+        console.print(render_menu())
+        action = Prompt.ask("Your choice").strip().lower()
+        if action == "add":
+            action = "a"
+        elif action == "remove":
+            action = "r"
+        elif action == "clear":
+            action = "c"
+        elif action == "quit":
+            action = "q"
 
+        os.environ["API_KEY"] = api_key
         set_key(".env", "API_KEY", api_key)
 
         if action == 'a':
-            category = input("Enter category to add: ")
+            category = Prompt.ask("Enter category to add").strip()
+            if not category:
+                console.print("[yellow]No category entered.[/yellow]")
+                continue
             add_search_category(category)
-            print(search_categories)
+            console.print(f"[green]Added:[/green] {category}")
         elif action == 'r':
-            category = input("Enter category to remove: ")
-            remove_search_category(category)
-            print(search_categories)
+            category_input = Prompt.ask("Enter category number or exact name to remove").strip()
+            if not category_input:
+                console.print("[yellow]No category entered.[/yellow]")
+                continue
+            if category_input.isdigit():
+                idx = int(category_input) - 1
+                if 0 <= idx < len(search_categories):
+                    category = search_categories[idx]
+                    remove_search_category(category)
+                    console.print(f"[green]Removed:[/green] {category}")
+                else:
+                    console.print("[yellow]Invalid category number.[/yellow]")
+            else:
+                remove_search_category(category_input)
+                console.print(f"[green]Removed (if present):[/green] {category_input}")
         elif action == 'c':
             clear_search_categories()
-            print(search_categories)
+            console.print("[yellow]All categories cleared.[/yellow]")
         elif action == 'run':
-            print("""Collecting Search Results from the master list!
-             """)
-            search_results = collector.get_fred_search(search_categories)
-            collector.export_master(search_results)
-            print("""Pulling data at a daily level
-             """)
-            daily_exporter = daily_export(Fred(api_key=api_key))
-            daily_exporter.dailyfilter()
-            daily_exporter.daily_series_collector()
-            print("""Pulling data at a monthly level
-             """)
-            monthly_exporter = monthly_export(Fred(api_key=api_key))
-            monthly_exporter.monthlyfilter()
-            monthly_exporter.monthly_series_collector()
-            print("""Pulling data at a weekly level
-             """)
-            weekly_exporter = weekly_export(Fred(api_key=api_key))
-            weekly_exporter.weeklyfilter()
-            weekly_exporter.weekly_series_collector()
-
-            print("complete!")
+            if not search_categories:
+                console.print("[red]Cannot run with no categories. Add at least one first.[/red]")
+                continue
+            execute_collection(api_key, search_categories)
             break  # Exit the loop after running
         elif action == 'q':
+            console.print("[yellow]Exiting lazy_fred.[/yellow]")
             break  # Exit the loop
         else:
-            print("Invalid input. Please choose a valid action.")
+            console.print("[yellow]Invalid input. Please choose a valid action.[/yellow]")
 
 def main():
     run_fred_data_collection(os.getenv("API_KEY"))

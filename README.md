@@ -45,6 +45,8 @@ After installation, run:
 
 ```bash
 lazy-fred
+# or
+lazy_fred
 ```
 
 The CLI is interactive and will prompt you to:
@@ -52,6 +54,81 @@ The CLI is interactive and will prompt you to:
 - run the data collection
 
 Note: because it uses `input()`, it is intended for interactive terminals.
+
+## Beginner guide (step-by-step)
+
+If you just want this to work, follow these exact steps.
+
+### Step 1: Install Python
+- Install Python 3.10+ from https://www.python.org/downloads/
+- During install on Windows, check "Add Python to PATH"
+
+### Step 2: Install `lazy_fred`
+
+Open a terminal and run:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install --upgrade lazy_fred
+```
+
+### Step 3: Get a free FRED API key
+- Create/sign in to FRED: https://fred.stlouisfed.org/
+- Generate your API key: https://fred.stlouisfed.org/docs/api/api_key.html
+- Copy the key
+
+### Step 4: Set your API key
+
+Pick one option:
+
+Option A (recommended): create a `.env` file in the folder where you will run commands:
+
+```bash
+API_KEY=paste_your_real_key_here
+```
+
+Option B: set it in your terminal session.
+
+Windows (PowerShell):
+```powershell
+$env:API_KEY="paste_your_real_key_here"
+```
+
+macOS/Linux (bash/zsh):
+```bash
+export API_KEY="paste_your_real_key_here"
+```
+
+### Step 5: Run the app
+
+```bash
+lazy-fred
+# or
+lazy_fred
+```
+
+You will see this menu:
+- `a` = add a search category
+- `r` = remove a search category
+- `c` = clear categories
+- `run` = start data collection
+- `q` = quit
+
+For first run: type `run` and press Enter.
+
+### Step 6: Find your output files
+
+After it finishes, these files will be created in your current folder:
+- `filtered_series.csv`
+- `daily_data.csv`
+- `weekly_data.csv`
+- `monthly_data.csv`
+
+### Common beginner issues
+- **`lazy-fred` / `lazy_fred` command not found**: run `python -m pip install --upgrade lazy_fred` again, then open a new terminal.
+- **API key error**: confirm key is valid and named exactly `API_KEY`.
+- **No output yet**: first run can take time because it queries many series.
+- **Running in notebooks/background tasks**: this tool is interactive (`input()`), so use a normal terminal.
 
 ## Output files
 
