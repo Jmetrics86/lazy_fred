@@ -22,8 +22,46 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry + Twine
+        run: python -m pip install --upgrade pip poetry twine
+
+      - name: Install dependencies
+        run: poetry install --with dev --no-interaction
+
+      - name: Validate Poetry configuration
+        run: poetry check
+
+      - name: Run tests
+        run: poetry run pytest -q
+
+      - name: Build distributions
+        run: poetry build
+
+      - name: Validate distributions
+        run: python -m twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist/*
+
   publish_trusted:
     if: github.event_name != 'workflow_dispatch' || inputs.publish_method == 'trusted'
+    needs: verify
     runs-on: ubuntu-latest
     env:
       # Opt-in to Node.js 24 for GitHub-hosted JavaScript actions.
@@ -39,11 +77,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Poetry
-        run: python -m pip install --upgrade pip poetry
-
-      - name: Build sdist and wheel with Poetry
-        run: poetry build
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -55,6 +93,7 @@ jobs:
 
   publish_poetry:
     if: github.event_name == 'workflow_dispatch' && inputs.publish_method == 'poetry'
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read

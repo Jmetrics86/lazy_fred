@@ -1,3 +1,178 @@
+# lazy_fred
+
+Pull FRED data with simple commands.
+
+## Install
+
+```bash
+python -m pip install --upgrade lazy_fred
+```
+
+## First run (terminal)
+
+```bash
+lazy-fred doctor
+lazy-fred quick
+```
+
+- `doctor` checks Python, API key, write permissions, and FRED connectivity.
+- `quick` runs a small popular starter set.
+
+You can also use:
+- `lazy-fred standard`
+- `lazy-fred full`
+- `lazy-fred favorites macro|rates|labor|markets`
+
+If no API key is set, you will be prompted and it will be saved.
+
+## Output files
+
+- `filtered_series.csv`
+- `daily_data.csv`
+- `monthly_data.csv`
+- `weekly_data.csv`
+
+Existing output files are backed up automatically to `backups/<timestamp>/`.
+
+## Time estimates and live ETA
+
+During search and pulls, the terminal shows:
+- estimated phase duration
+- live elapsed time
+- live ETA
+- average seconds per series at phase completion
+
+## Google Colab (clickable UI)
+
+```python
+!pip install -U lazy_fred ipywidgets
+import lazy_fred as lf
+from google.colab import userdata
+
+lf.launch_notebook_ui(userdata.get("fred_api_key"))
+```
+
+If Colab says `launch_notebook_ui` is missing:
+
+```python
+!pip install -U "git+https://github.com/Jmetrics86/lazy_fred.git"
+```
+
+## Simple Python usage
+
+```python
+import lazy_fred as lf
+
+api_key = "YOUR_FRED_API_KEY"
+lf.run_favorites(api_key, "macro")
+```
+
+Or custom categories:
+
+```python
+lf.run_fred_data_collection(
+    api_key,
+    categories=["gdp", "unemployment", "retail trade"],
+    interactive=False,
+)
+```
+
+## License
+
+MIT
+
+# lazy_fred
+
+Download FRED economic data with one install and simple prompts.
+
+## 1) Install
+
+```bash
+python -m pip install --upgrade lazy_fred
+```
+
+## 2) Get a free FRED API key
+
+1. Go to https://fred.stlouisfed.org/
+2. Create an account (free)
+3. Create API key: https://fred.stlouisfed.org/docs/api/api_key.html
+4. Copy your key
+
+## 3) Run (terminal)
+
+Use either command:
+
+```bash
+lazy-fred
+# or
+lazy_fred
+```
+
+On first run, paste your API key when asked.
+
+Then type:
+- `run-all` to pull all default categories (easiest)
+- or `run` to pull your current selected categories
+
+## 4) Files you get
+
+After it finishes, you will have:
+- `filtered_series.csv`
+- `daily_data.csv`
+- `weekly_data.csv`
+- `monthly_data.csv`
+
+---
+
+## Google Colab (clickable UI)
+
+```python
+!pip install -U lazy_fred ipywidgets
+import lazy_fred as lf
+from google.colab import userdata
+
+lf.launch_notebook_ui(userdata.get("fred_api_key"))
+```
+
+If your installed version does not have `launch_notebook_ui`, run:
+
+```python
+!pip install -U "git+https://github.com/Jmetrics86/lazy_fred.git"
+```
+
+---
+
+## Fast favorites (no menu typing)
+
+```python
+import lazy_fred as lf
+
+api_key = "YOUR_FRED_API_KEY"
+lf.run_favorites(api_key, "macro")
+```
+
+Other profiles:
+- `rates`
+- `labor`
+- `markets`
+
+---
+
+## Most common issues
+
+- **Command not found**: reinstall and open a new terminal.
+  ```bash
+  python -m pip install --upgrade lazy_fred
+  ```
+- **API key error**: make sure the key is valid and active on FRED.
+- **Colab missing function**: upgrade package (or install from GitHub).
+
+---
+
+## License
+
+MIT
+
 ![lazy_fred_social](https://github.com/Jmetrics86/lazy_fred/assets/19334741/c7ae2ec3-2ef6-4ca7-b126-78622537d5e0)
 
 ![example workflow](https://github.com/Jmetrics86/lazy_fred//actions/workflows/python-app.yml/badge.svg) ![PyPI - Version](https://img.shields.io/pypi/v/lazy_fred)
@@ -202,19 +377,19 @@ Inside the TUI menu:
 ## Release process
 
 ### 1) Bump version
-Update `version` in `pyproject.toml` (for example, `0.1.66` -> `0.1.67`), then commit and push.
+Update `version` in `pyproject.toml` (for example, `0.1.67` -> `0.1.68`), then commit and push.
 
 ### 2) Publish via GitHub Trusted Publishing (recommended)
 This repository includes `.github/workflows/publish-pypi.yml`.
 
 It publishes to PyPI automatically when you:
 - publish a GitHub Release, or
-- push a version tag matching `v*` (example: `v0.1.67`)
+- push a version tag matching `v*` (example: `v0.1.68`)
 
 Example:
 ```bash
-git tag v0.1.67
-git push origin v0.1.67
+git tag v0.1.68
+git push origin v0.1.68
 ```
 
 Requirements:

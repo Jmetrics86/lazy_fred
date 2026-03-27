@@ -5,6 +5,8 @@ from fredapi import Fred
 import fred
 import datetime
 import os
+import sys
+import shutil
 from dotenv import load_dotenv, set_key
 import json
 from rich.console import Console
@@ -18,6 +20,8 @@ console = Console()
 
 sleep = 0.5
 searchlimit = 1000 # 1000 is max
+AVG_SEARCH_SECONDS_PER_CATEGORY = 1.0
+AVG_PULL_SECONDS_PER_SERIES = 1.2
 #search_categories = ['Interest Rates', 'Exchange Rates'] #this one is for quick testing
 DEFAULT_SEARCH_CATEGORIES = ['interest rates', 'exchange rates', 'monetary data', 'financial indicator', 'banking industry','gdp' , 'banking', 'business lending', 'foreign exchange intervention', 'current population', 'employment', 'education', 'income', 'job opening', 'labor turnover', 'productivity index', 'cost index', 'minimum wage', 'tax rate', 'retail trade', 'services', 'technology', 'housing', 'expenditures', 'business survey', 'wholesale trade', 'transportation', 'automotive', 'house price indexes', 'cryptocurrency']
 search_categories = DEFAULT_SEARCH_CATEGORIES.copy()
@@ -26,6 +30,11 @@ FAVORITE_PROFILES = {
     "rates": ["interest rates", "exchange rates", "monetary data"],
     "labor": ["employment", "job opening", "labor turnover", "income"],
     "markets": ["financial indicator", "banking", "housing", "retail trade"],
+}
+STARTER_MODES = {
+    "quick": FAVORITE_PROFILES["macro"],
+    "standard": DEFAULT_SEARCH_CATEGORIES[:12],
+    "full": DEFAULT_SEARCH_CATEGORIES,
 }
 
 
@@ -52,6 +61,17 @@ def render_menu():
         title="lazy_fred menu",
         border_style="blue",
     )
+
+
+def format_duration(seconds):
+    seconds = max(0, int(seconds))
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {sec}s"
+    if minutes:
+        return f"{minutes}m {sec}s"
+    return f"{sec}s"
 
 
 def resolve_categories(user_categories):
@@ -84,6 +104,7 @@ def resolve_categories(user_categories):
 
 
 def execute_collection(api_key, categories_to_use):
+    backup_existing_outputs()
     collector = CollectCategories(api_key)
     console.print(Panel("Collecting search results from FRED...", border_style="cyan"))
     search_results = collector.get_fred_search(categories_to_use)
@@ -111,6 +132,98 @@ def execute_collection(api_key, categories_to_use):
     output_table.add_row("monthly_data.csv")
     output_table.add_row("weekly_data.csv")
     console.print(output_table)
+
+
+def build_series_metadata_map(path="filtered_series.csv"):
+    """Return {series_id: {'title': str, 'popularity': int|None}}."""
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return {}
+
+    if "id" not in df.columns:
+        return {}
+
+    meta = {}
+    for _, row in df.iterrows():
+        series_id = str(row.get("id", "")).strip()
+        if not series_id:
+            continue
+        title = str(row.get("title", "")).strip()
+        popularity = row.get("popularity")
+        try:
+            popularity = int(popularity)
+        except Exception:
+            popularity = None
+        meta[series_id] = {"title": title, "popularity": popularity}
+    return meta
+
+
+def backup_existing_outputs():
+    """Backup output files before overwriting them."""
+    output_files = [
+        "filtered_series.csv",
+        "daily_data.csv",
+        "monthly_data.csv",
+        "weekly_data.csv",
+    ]
+    existing = [f for f in output_files if os.path.exists(f)]
+    if not existing:
+        return
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join("backups", timestamp)
+    os.makedirs(backup_dir, exist_ok=True)
+    for filename in existing:
+        shutil.copy2(filename, os.path.join(backup_dir, filename))
+    console.print(
+        f"[yellow]Backed up existing output files to:[/yellow] {os.path.abspath(backup_dir)}"
+    )
+
+
+def run_doctor():
+    """Basic environment checks for first-time users."""
+    load_dotenv()
+    table = Table(title="lazy_fred doctor")
+    table.add_column("Check", style="cyan")
+    table.add_column("Status")
+    table.add_column("Details", style="dim")
+
+    py_ok = sys.version_info >= (3, 10)
+    table.add_row(
+        "Python version",
+        "[green]OK[/green]" if py_ok else "[red]FAIL[/red]",
+        f"{sys.version.split()[0]} (needs >= 3.10)",
+    )
+
+    key = os.getenv("API_KEY") or os.getenv("FRED_API_KEY")
+    has_key = bool((key or "").strip())
+    table.add_row(
+        "FRED API key",
+        "[green]OK[/green]" if has_key else "[yellow]MISSING[/yellow]",
+        "Set API_KEY or FRED_API_KEY",
+    )
+
+    write_ok = os.access(os.getcwd(), os.W_OK)
+    table.add_row(
+        "Output directory writable",
+        "[green]OK[/green]" if write_ok else "[red]FAIL[/red]",
+        os.getcwd(),
+    )
+
+    if has_key:
+        try:
+            Fred(api_key=key).search("gdp", limit=1)
+            table.add_row("FRED API connectivity", "[green]OK[/green]", "Live call succeeded")
+        except Exception as exc:
+            table.add_row("FRED API connectivity", "[red]FAIL[/red]", str(exc)[:120])
+    else:
+        table.add_row("FRED API connectivity", "[yellow]SKIPPED[/yellow]", "No API key set")
+
+    console.print(table)
+    console.print(
+        "\nTry one of: [cyan]lazy-fred quick[/cyan], [cyan]lazy-fred standard[/cyan], [cyan]lazy-fred full[/cyan]"
+    )
 
 
 def add_search_category(category):
@@ -200,11 +313,27 @@ class CollectCategories:
         fred.key(self.api_key)
         search_dict = []
         total_categories = len(categories)
+        est_seconds = total_categories * AVG_SEARCH_SECONDS_PER_CATEGORY
+        console.print(
+            Panel(
+                f"Search phase estimate: ~{format_duration(est_seconds)} "
+                f"for {total_categories} categories",
+                border_style="cyan",
+            )
+        )
+        start = time.time()
         for index, category in enumerate(categories, start=1):
             search_results = fred.search(category)
             search_dict.append(search_results)
             time.sleep(sleep)
-            console.print(f"[dim]Processing {category} ({index}/{total_categories})[/dim]", soft_wrap=True)
+            elapsed = time.time() - start
+            avg_so_far = elapsed / index
+            eta = max((total_categories - index) * avg_so_far, 0)
+            console.print(
+                f"[dim]Processing {category} ({index}/{total_categories}) | "
+                f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}[/dim]",
+                soft_wrap=True,
+            )
         CollectCategories.save_dict_to_json(search_dict)
         return search_dict
 
@@ -245,18 +374,42 @@ class daily_export:
         fred = Fred(api_key=os.getenv("API_KEY")) 
 
         merged_data = pd.DataFrame()
+        series_meta = build_series_metadata_map()
+        series_list = daily_export.dailyfilter(self)
+        total_series = len(series_list)
+        est_seconds = total_series * AVG_PULL_SECONDS_PER_SERIES
+        console.print(
+            Panel(
+                f"Daily pull estimate: ~{format_duration(est_seconds)} "
+                f"for {total_series} series",
+                border_style="cyan",
+            )
+        )
+        phase_start = time.time()
         max_retries = 5  # Maximum number of retry attempts
         retry_count = 0  # Current retry count
         initial_wait_time = 0.2  # Initial wait time in seconds
 
-        for series_id in daily_export.dailyfilter(self):
+        for index, series_id in enumerate(series_list, start=1):
             while retry_count < max_retries:
                 try:
                     data = pd.DataFrame(fred.get_series(series_id))
                     data['series'] = series_id
                     merged_data = pd.concat([merged_data, data], axis=0)
-                    print(series_id)
+                    meta = series_meta.get(series_id, {})
+                    title = meta.get("title") or "Unknown series"
+                    popularity = meta.get("popularity")
+                    pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
+                    elapsed = time.time() - phase_start
+                    avg_so_far = elapsed / index
+                    eta = max((total_series - index) * avg_so_far, 0)
+                    console.print(
+                        f"[green]{series_id}[/green] ({index}/{total_series}) | "
+                        f"{title} | {pop_text} | "
+                        f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
+                    )
                     time.sleep(sleep)
+                    retry_count = 0 # Reset retry count for the next series
                     break  # Break out of the retry loop if successful
 
                 except Exception as e:
@@ -276,7 +429,13 @@ class daily_export:
         merged_data = merged_data.reset_index()
         merged_data = merged_data.rename(columns={'index': 'date', 0: 'value'})
         merged_data.to_csv('daily_data.csv')
-        print("daily series generated")
+        total_elapsed = time.time() - phase_start
+        avg_per_series = (total_elapsed / total_series) if total_series else 0
+        console.print(
+            f"[bold green]Daily series generated[/bold green] | "
+            f"total={format_duration(total_elapsed)} | "
+            f"avg/series={avg_per_series:.2f}s"
+        )
 
 
 class monthly_export:
@@ -294,19 +453,42 @@ class monthly_export:
 
     def monthly_series_collector(self):
         monthly_merged_data = pd.DataFrame()
+        series_meta = build_series_metadata_map()
+        series_list = monthly_export.monthlyfilter(self)
+        total_series = len(series_list)
+        est_seconds = total_series * AVG_PULL_SECONDS_PER_SERIES
+        console.print(
+            Panel(
+                f"Monthly pull estimate: ~{format_duration(est_seconds)} "
+                f"for {total_series} series",
+                border_style="cyan",
+            )
+        )
+        phase_start = time.time()
         max_retries = 5  # Maximum number of retry attempts
         retry_count = 0  # Current retry count
         initial_wait_time = 0.2  # Initial wait time in seconds
         fred = Fred(api_key=os.getenv("API_KEY")) 
 
 
-        for series_id in monthly_export.monthlyfilter(self):
+        for index, series_id in enumerate(series_list, start=1):
             while retry_count < max_retries:
                 try:
                     data = pd.DataFrame(fred.get_series(series_id))
                     data['series'] = series_id
                     monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)  # Update merged data
-                    print(series_id)
+                    meta = series_meta.get(series_id, {})
+                    title = meta.get("title") or "Unknown series"
+                    popularity = meta.get("popularity")
+                    pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
+                    elapsed = time.time() - phase_start
+                    avg_so_far = elapsed / index
+                    eta = max((total_series - index) * avg_so_far, 0)
+                    console.print(
+                        f"[green]{series_id}[/green] ({index}/{total_series}) | "
+                        f"{title} | {pop_text} | "
+                        f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
+                    )
                     time.sleep(sleep)
                     retry_count = 0 # Reset retry count for the next series
                     break  # Break out of the retry loop if successful
@@ -327,7 +509,13 @@ class monthly_export:
         monthly_merged_data = monthly_merged_data.reset_index()
         monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
         monthly_merged_data.to_csv('monthly_data.csv')
-        print("monthly series completed!")
+        total_elapsed = time.time() - phase_start
+        avg_per_series = (total_elapsed / total_series) if total_series else 0
+        console.print(
+            f"[bold green]Monthly series completed[/bold green] | "
+            f"total={format_duration(total_elapsed)} | "
+            f"avg/series={avg_per_series:.2f}s"
+        )
 
 
 
@@ -347,19 +535,42 @@ class weekly_export:
         
     def weekly_series_collector(self):
         weekly_merged_data = pd.DataFrame()
+        series_meta = build_series_metadata_map()
+        series_list = weekly_export.weeklyfilter(self)
+        total_series = len(series_list)
+        est_seconds = total_series * AVG_PULL_SECONDS_PER_SERIES
+        console.print(
+            Panel(
+                f"Weekly pull estimate: ~{format_duration(est_seconds)} "
+                f"for {total_series} series",
+                border_style="cyan",
+            )
+        )
+        phase_start = time.time()
         max_retries = 5  # Maximum number of retry attempts
         retry_count = 0  # Current retry count
         initial_wait_time = 0.2  # Initial wait time in seconds
         fred = Fred(api_key=os.getenv("API_KEY")) 
 
 
-        for series_id in weekly_export.weeklyfilter(self):
+        for index, series_id in enumerate(series_list, start=1):
             while retry_count < max_retries:
                 try:
                     data = pd.DataFrame(fred.get_series(series_id))
                     data['series'] = series_id
                     weekly_merged_data = pd.concat([weekly_merged_data, data], axis=0)  # Update merged data
-                    print(series_id)
+                    meta = series_meta.get(series_id, {})
+                    title = meta.get("title") or "Unknown series"
+                    popularity = meta.get("popularity")
+                    pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
+                    elapsed = time.time() - phase_start
+                    avg_so_far = elapsed / index
+                    eta = max((total_series - index) * avg_so_far, 0)
+                    console.print(
+                        f"[green]{series_id}[/green] ({index}/{total_series}) | "
+                        f"{title} | {pop_text} | "
+                        f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
+                    )
                     time.sleep(sleep)
                     retry_count = 0 # Reset retry count for the next series
                     break  # Break out of the retry loop if successful
@@ -379,7 +590,13 @@ class weekly_export:
         weekly_merged_data = weekly_merged_data.reset_index()
         weekly_merged_data = weekly_merged_data.rename(columns={'index': 'date', 0: 'value'})
         weekly_merged_data.to_csv('weekly_data.csv')
-        print("weekly series completed!")
+        total_elapsed = time.time() - phase_start
+        avg_per_series = (total_elapsed / total_series) if total_series else 0
+        console.print(
+            f"[bold green]Weekly series completed[/bold green] | "
+            f"total={format_duration(total_elapsed)} | "
+            f"avg/series={avg_per_series:.2f}s"
+        )
 
 
 def run_fred_data_collection(api_key, categories=None, interactive=True):
@@ -489,7 +706,24 @@ def run_fred_data_collection(api_key, categories=None, interactive=True):
             console.print("[yellow]Invalid input. Please choose a valid action.[/yellow]")
 
 def main():
-    run_fred_data_collection(os.getenv("API_KEY"))
+    args = [a.strip().lower() for a in sys.argv[1:]]
+    if not args:
+        run_fred_data_collection(os.getenv("API_KEY"))
+        return
+
+    cmd = args[0]
+    if cmd == "doctor":
+        run_doctor()
+    elif cmd in STARTER_MODES:
+        run_starter_mode(os.getenv("API_KEY"), cmd)
+    elif cmd == "favorites":
+        profile = args[1] if len(args) > 1 else "macro"
+        run_favorites(os.getenv("API_KEY"), profile)
+    else:
+        console.print(
+            "[yellow]Unknown command.[/yellow] "
+            "Use: doctor | quick | standard | full | favorites <profile>"
+        )
 
 
 def launch_notebook_ui(api_key=None):
@@ -598,6 +832,19 @@ def run_favorites(api_key=None, profile="macro"):
     return run_fred_data_collection(
         api_key,
         categories=FAVORITE_PROFILES[key],
+        interactive=False,
+    )
+
+
+def run_starter_mode(api_key=None, mode="quick"):
+    """Run quick/standard/full starter modes."""
+    key = (mode or "").strip().lower()
+    if key not in STARTER_MODES:
+        valid = ", ".join(sorted(STARTER_MODES.keys()))
+        raise ValueError(f"Unknown mode '{mode}'. Use one of: {valid}")
+    return run_fred_data_collection(
+        api_key,
+        categories=STARTER_MODES[key],
         interactive=False,
     )
 
