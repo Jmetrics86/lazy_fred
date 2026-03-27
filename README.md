@@ -75,6 +75,39 @@ This will also start the interactive menu (it blocks on `input()`).
 - Lint: `poetry run ruff check .`
 - Tests (requires a real key): `API_KEY=<your_key> poetry run pytest`
 
+## Release process
+
+### 1) Bump version
+Update `version` in `pyproject.toml` (for example, `0.1.66` -> `0.1.67`), then commit and push.
+
+### 2) Publish via GitHub Trusted Publishing (recommended)
+This repository includes `.github/workflows/publish-pypi.yml`.
+
+It publishes to PyPI automatically when you:
+- publish a GitHub Release, or
+- push a version tag matching `v*` (example: `v0.1.67`)
+
+Example:
+```bash
+git tag v0.1.67
+git push origin v0.1.67
+```
+
+Requirements:
+- PyPI project `lazy_fred` must have this GitHub repository configured as a Trusted Publisher.
+
+### 3) Poetry fallback publish (manual)
+If you need a manual fallback path, run the same GitHub workflow from the Actions tab with:
+- `publish_method = poetry`
+
+This method uses:
+- `poetry publish --build --skip-existing`
+- repository secret `PYPI_API_TOKEN`
+
+### 4) Verify release
+After publish, confirm the new version appears at:
+- https://pypi.org/project/lazy_fred/
+
 ## Disclaimer
 
 This library is not affiliated with or endorsed by the Federal Reserve Bank of St. Louis or the FRED project.

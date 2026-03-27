@@ -3,13 +3,27 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish_method:
+        description: "Publish method"
+        required: true
+        default: "trusted"
+        type: choice
+        options:
+          - trusted
+          - poetry
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  publish:
+  publish_trusted:
+    if: github.event_name != 'workflow_dispatch' || inputs.publish_method == 'trusted'
     runs-on: ubuntu-latest
     env:
       # Opt-in to Node.js 24 for GitHub-hosted JavaScript actions.
@@ -23,20 +37,42 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
-      - name: Install build package
-        run: python -m pip install --upgrade build
+      - name: Install Poetry
+        run: python -m pip install --upgrade pip poetry
 
-      - name: Build sdist and wheel
-        run: python -m build
+      - name: Build sdist and wheel with Poetry
+        run: poetry build
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          packages-dir: dist/
           verbose: true
-          # Digital attestations can sometimes produce opaque 400s.
-          # Disabling them helps confirm the core upload works.
           attestations: false
-          # Prevent failures if the same version was already uploaded.
           skip_existing: true
+
+  publish_poetry:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_method == 'poetry'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: python -m pip install --upgrade pip poetry
+
+      - name: Publish with Poetry (token-based)
+        env:
+          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_API_TOKEN }}
+        run: poetry publish --build --skip-existing
