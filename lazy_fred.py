@@ -104,6 +104,208 @@ def backoff_sleep(attempt, initial_wait=DEFAULT_INITIAL_BACKOFF_SECONDS):
     time.sleep(wait_time)
 
 
+PULL_FAILURES_CSV = "pull_failures.csv"
+
+
+def _series_observations_present(data: pd.DataFrame) -> bool:
+    if data.empty:
+        return False
+    without = data.drop(columns=["series"], errors="ignore")
+    if without.empty:
+        return False
+    return bool(without.notna().to_numpy().any())
+
+
+def _pull_series_with_retries(
+    fred,
+    series_id,
+    observation_start,
+    *,
+    initial_backoff,
+):
+    """Fetch one series with retries. Returns (status, data_frame_or_none, error_detail)."""
+    last_error = None
+    for attempt in range(DEFAULT_MAX_RETRIES):
+        try:
+            kwargs = {}
+            if observation_start:
+                kwargs["observation_start"] = observation_start
+            data = pd.DataFrame(fred.get_series(series_id, **kwargs))
+            data["series"] = series_id
+            if _series_observations_present(data):
+                return "ok", data, None
+            return "empty", None, None
+        except Exception as e:
+            last_error = str(e)
+            if is_retryable_exception(e) and attempt < DEFAULT_MAX_RETRIES - 1:
+                backoff_sleep(attempt, initial_wait=initial_backoff)
+                continue
+            logger.error(f"Error fetching series {series_id}: {e}")
+            return "error", None, last_error
+    return "error", None, last_error
+
+
+def _print_pull_failures_review(phase_label: str, failures: list) -> None:
+    if not failures:
+        return
+    table = Table(title=f"{phase_label}: first-pass issues ({len(failures)} series)")
+    table.add_column("series_id", style="cyan")
+    table.add_column("reason", style="yellow")
+    table.add_column("detail", style="dim", max_width=60)
+    for row in failures[:50]:
+        detail = (row.get("detail") or "")[:200]
+        table.add_row(str(row.get("series_id", "")), str(row.get("reason", "")), detail)
+    console.print(table)
+    if len(failures) > 50:
+        console.print(
+            f"[dim]… and {len(failures) - 50} more "
+            f"(remaining failures written to {PULL_FAILURES_CSV} after all phases)[/dim]"
+        )
+
+
+def _run_series_pull_phase(
+    fred,
+    phase: str,
+    phase_label: str,
+    series_list: list,
+    csv_filename: str,
+    series_meta: dict,
+    observation_start,
+    *,
+    completion_title: str,
+):
+    """
+    First pass + optional catch-up for empty/error series; write CSV with deduped rows.
+    Returns list of failure dicts still failing after catch-up.
+    """
+    merged_data = pd.DataFrame()
+    total_series = len(series_list)
+    est_seconds = total_series * AVG_PULL_SECONDS_PER_SERIES
+    console.print(
+        Panel(
+            f"{phase_label} pull estimate: ~{format_duration(est_seconds)} "
+            f"for {total_series} series",
+            border_style="cyan",
+        )
+    )
+    phase_start = time.time()
+    initial_backoff = DEFAULT_INITIAL_BACKOFF_SECONDS
+    inter_sleep = sleep
+
+    failures_first = []
+
+    for index, series_id in enumerate(series_list, start=1):
+        status, frame, err_detail = _pull_series_with_retries(
+            fred,
+            series_id,
+            observation_start,
+            initial_backoff=initial_backoff,
+        )
+        meta = series_meta.get(series_id, {})
+        title = meta.get("title") or "Unknown series"
+        popularity = meta.get("popularity")
+        pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
+        insight = build_series_insight(meta)
+        freq_label = FREQUENCY_LABELS.get(meta.get("frequency_short"), "periodic")
+        elapsed = time.time() - phase_start
+        avg_so_far = elapsed / index if index else 0
+        eta = max((total_series - index) * avg_so_far, 0)
+
+        if status == "ok":
+            merged_data = pd.concat([merged_data, frame], axis=0)
+            console.print(
+                f"[green]{series_id}[/green] ({index}/{total_series}) | "
+                f"{title} | {freq_label} | {pop_text} | "
+                f"[dim]{insight}[/dim] | "
+                f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
+            )
+            time.sleep(inter_sleep)
+        elif status == "empty":
+            failures_first.append(
+                {
+                    "phase": phase,
+                    "series_id": series_id,
+                    "reason": "empty",
+                    "detail": "no observations returned",
+                }
+            )
+            console.print(
+                f"[yellow]{series_id}[/yellow] ({index}/{total_series}) | "
+                f"{title} | [dim]empty — queued for catch-up[/dim]"
+            )
+        else:
+            failures_first.append(
+                {
+                    "phase": phase,
+                    "series_id": series_id,
+                    "reason": "error",
+                    "detail": (err_detail or "")[:500],
+                }
+            )
+            console.print(
+                f"[red]{series_id}[/red] ({index}/{total_series}) | "
+                f"{title} | [dim]failed — queued for catch-up[/dim]"
+            )
+
+    remaining: list = []
+    if failures_first:
+        _print_pull_failures_review(phase_label, failures_first)
+        console.print(
+            Panel(
+                f"[bold]Catch-up pass[/bold] for {len(failures_first)} series "
+                f"(2× backoff, 2× pause between pulls)",
+                border_style="yellow",
+            )
+        )
+        catchup_backoff = DEFAULT_INITIAL_BACKOFF_SECONDS * 2
+        catchup_sleep = sleep * 2
+        retry_ids = list(dict.fromkeys(f["series_id"] for f in failures_first))
+        for idx, series_id in enumerate(retry_ids, start=1):
+            status, frame, err_detail = _pull_series_with_retries(
+                fred,
+                series_id,
+                observation_start,
+                initial_backoff=catchup_backoff,
+            )
+            meta = series_meta.get(series_id, {})
+            title = meta.get("title") or "Unknown series"
+            if status == "ok":
+                merged_data = pd.concat([merged_data, frame], axis=0)
+                console.print(
+                    f"[green]{series_id}[/green] catch-up ({idx}/{len(retry_ids)}) | {title} | ok"
+                )
+                time.sleep(catchup_sleep)
+            else:
+                reason = "empty" if status == "empty" else "error"
+                detail = (err_detail or "no observations returned")[:500]
+                remaining.append(
+                    {
+                        "phase": phase,
+                        "series_id": series_id,
+                        "reason": reason,
+                        "detail": detail,
+                    }
+                )
+                console.print(
+                    f"[red]{series_id}[/red] catch-up ({idx}/{len(retry_ids)}) | {title} | still {reason}"
+                )
+
+    merged_data = merged_data.reset_index()
+    merged_data = merged_data.rename(columns={"index": "date", 0: "value"})
+    if not merged_data.empty and "date" in merged_data.columns and "series" in merged_data.columns:
+        merged_data = merged_data.drop_duplicates(subset=["date", "series"], keep="last")
+    merged_data.to_csv(csv_filename)
+    total_elapsed = time.time() - phase_start
+    avg_per_series = (total_elapsed / total_series) if total_series else 0
+    console.print(
+        f"[bold green]{completion_title}[/bold green] | "
+        f"total={format_duration(total_elapsed)} | "
+        f"avg/series={avg_per_series:.2f}s"
+    )
+
+    return remaining
+
+
 def parse_start_date(value):
     if value is None:
         return None
@@ -163,20 +365,42 @@ def execute_collection(api_key, categories_to_use, observation_start=None):
     search_results = collector.get_fred_search(categories_to_use)
     collector.export_master(search_results)
 
+    pull_failures_aggregate: list = []
+
     console.print(Panel("Pulling daily data...", border_style="cyan"))
     daily_exporter = daily_export(Fred(api_key=api_key))
     daily_exporter.dailyfilter()
-    daily_exporter.daily_series_collector(observation_start=observation_start)
+    pull_failures_aggregate.extend(
+        daily_exporter.daily_series_collector(observation_start=observation_start)
+    )
 
     console.print(Panel("Pulling monthly data...", border_style="cyan"))
     monthly_exporter = monthly_export(Fred(api_key=api_key))
     monthly_exporter.monthlyfilter()
-    monthly_exporter.monthly_series_collector(observation_start=observation_start)
+    pull_failures_aggregate.extend(
+        monthly_exporter.monthly_series_collector(observation_start=observation_start)
+    )
 
     console.print(Panel("Pulling weekly data...", border_style="cyan"))
     weekly_exporter = weekly_export(Fred(api_key=api_key))
     weekly_exporter.weeklyfilter()
-    weekly_exporter.weekly_series_collector(observation_start=observation_start)
+    pull_failures_aggregate.extend(
+        weekly_exporter.weekly_series_collector(observation_start=observation_start)
+    )
+
+    fail_cols = ["phase", "series_id", "reason", "detail"]
+    pd.DataFrame(pull_failures_aggregate, columns=fail_cols).to_csv(
+        PULL_FAILURES_CSV, index=False
+    )
+    if pull_failures_aggregate:
+        console.print(
+            Panel(
+                f"[yellow]{len(pull_failures_aggregate)} series still missing after catch-up "
+                f"(see {PULL_FAILURES_CSV})[/yellow]",
+                title="Pull failures",
+                border_style="yellow",
+            )
+        )
 
     output_table = Table(title="Run complete - output files")
     output_table.add_column("File", style="green")
@@ -184,6 +408,7 @@ def execute_collection(api_key, categories_to_use, observation_start=None):
     output_table.add_row("daily_data.csv")
     output_table.add_row("monthly_data.csv")
     output_table.add_row("weekly_data.csv")
+    output_table.add_row(PULL_FAILURES_CSV)
     console.print(output_table)
 
 
@@ -476,65 +701,18 @@ class daily_export:
         return daily_list
 
     def daily_series_collector(self, observation_start=None):
-        fred = Fred(api_key=os.getenv("API_KEY")) 
-
-        merged_data = pd.DataFrame()
+        fred = Fred(api_key=os.getenv("API_KEY"))
         series_meta = build_series_metadata_map()
         series_list = daily_export.dailyfilter(self)
-        total_series = len(series_list)
-        est_seconds = total_series * AVG_PULL_SECONDS_PER_SERIES
-        console.print(
-            Panel(
-                f"Daily pull estimate: ~{format_duration(est_seconds)} "
-                f"for {total_series} series",
-                border_style="cyan",
-            )
-        )
-        phase_start = time.time()
-        for index, series_id in enumerate(series_list, start=1):
-            for attempt in range(DEFAULT_MAX_RETRIES):
-                try:
-                    kwargs = {}
-                    if observation_start:
-                        kwargs["observation_start"] = observation_start
-                    data = pd.DataFrame(fred.get_series(series_id, **kwargs))
-                    data['series'] = series_id
-                    merged_data = pd.concat([merged_data, data], axis=0)
-                    meta = series_meta.get(series_id, {})
-                    title = meta.get("title") or "Unknown series"
-                    popularity = meta.get("popularity")
-                    pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
-                    insight = build_series_insight(meta)
-                    freq_label = FREQUENCY_LABELS.get(meta.get("frequency_short"), "periodic")
-                    elapsed = time.time() - phase_start
-                    avg_so_far = elapsed / index
-                    eta = max((total_series - index) * avg_so_far, 0)
-                    console.print(
-                        f"[green]{series_id}[/green] ({index}/{total_series}) | "
-                        f"{title} | {freq_label} | {pop_text} | "
-                        f"[dim]{insight}[/dim] | "
-                        f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
-                    )
-                    time.sleep(sleep)
-                    break  # Break out of the retry loop if successful
-
-                except Exception as e:
-                    if is_retryable_exception(e) and attempt < DEFAULT_MAX_RETRIES - 1:
-                        backoff_sleep(attempt)
-                        continue
-                    logger.error(f"Error fetching series {series_id}: {e}")
-                    break
-            
-
-        merged_data = merged_data.reset_index()
-        merged_data = merged_data.rename(columns={'index': 'date', 0: 'value'})
-        merged_data.to_csv('daily_data.csv')
-        total_elapsed = time.time() - phase_start
-        avg_per_series = (total_elapsed / total_series) if total_series else 0
-        console.print(
-            f"[bold green]Daily series generated[/bold green] | "
-            f"total={format_duration(total_elapsed)} | "
-            f"avg/series={avg_per_series:.2f}s"
+        return _run_series_pull_phase(
+            fred,
+            "daily",
+            "Daily",
+            series_list,
+            "daily_data.csv",
+            series_meta,
+            observation_start,
+            completion_title="Daily series generated",
         )
 
 
@@ -552,66 +730,18 @@ class monthly_export:
 
 
     def monthly_series_collector(self, observation_start=None):
-        monthly_merged_data = pd.DataFrame()
+        fred = Fred(api_key=os.getenv("API_KEY"))
         series_meta = build_series_metadata_map()
         series_list = monthly_export.monthlyfilter(self)
-        total_series = len(series_list)
-        est_seconds = total_series * AVG_PULL_SECONDS_PER_SERIES
-        console.print(
-            Panel(
-                f"Monthly pull estimate: ~{format_duration(est_seconds)} "
-                f"for {total_series} series",
-                border_style="cyan",
-            )
-        )
-        phase_start = time.time()
-        fred = Fred(api_key=os.getenv("API_KEY")) 
-
-
-        for index, series_id in enumerate(series_list, start=1):
-            for attempt in range(DEFAULT_MAX_RETRIES):
-                try:
-                    kwargs = {}
-                    if observation_start:
-                        kwargs["observation_start"] = observation_start
-                    data = pd.DataFrame(fred.get_series(series_id, **kwargs))
-                    data['series'] = series_id
-                    monthly_merged_data = pd.concat([monthly_merged_data, data], axis=0)  # Update merged data
-                    meta = series_meta.get(series_id, {})
-                    title = meta.get("title") or "Unknown series"
-                    popularity = meta.get("popularity")
-                    pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
-                    insight = build_series_insight(meta)
-                    freq_label = FREQUENCY_LABELS.get(meta.get("frequency_short"), "periodic")
-                    elapsed = time.time() - phase_start
-                    avg_so_far = elapsed / index
-                    eta = max((total_series - index) * avg_so_far, 0)
-                    console.print(
-                        f"[green]{series_id}[/green] ({index}/{total_series}) | "
-                        f"{title} | {freq_label} | {pop_text} | "
-                        f"[dim]{insight}[/dim] | "
-                        f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
-                    )
-                    time.sleep(sleep)
-                    break  # Break out of the retry loop if successful
-
-                except Exception as e:
-                    if is_retryable_exception(e) and attempt < DEFAULT_MAX_RETRIES - 1:
-                        backoff_sleep(attempt)
-                        continue
-                    logger.error(f"Error fetching series {series_id}: {e}")
-                    break
-
-
-        monthly_merged_data = monthly_merged_data.reset_index()
-        monthly_merged_data = monthly_merged_data.rename(columns={'index': 'date', 0: 'value'})
-        monthly_merged_data.to_csv('monthly_data.csv')
-        total_elapsed = time.time() - phase_start
-        avg_per_series = (total_elapsed / total_series) if total_series else 0
-        console.print(
-            f"[bold green]Monthly series completed[/bold green] | "
-            f"total={format_duration(total_elapsed)} | "
-            f"avg/series={avg_per_series:.2f}s"
+        return _run_series_pull_phase(
+            fred,
+            "monthly",
+            "Monthly",
+            series_list,
+            "monthly_data.csv",
+            series_meta,
+            observation_start,
+            completion_title="Monthly series completed",
         )
 
 
@@ -631,65 +761,18 @@ class weekly_export:
 
         
     def weekly_series_collector(self, observation_start=None):
-        weekly_merged_data = pd.DataFrame()
+        fred = Fred(api_key=os.getenv("API_KEY"))
         series_meta = build_series_metadata_map()
         series_list = weekly_export.weeklyfilter(self)
-        total_series = len(series_list)
-        est_seconds = total_series * AVG_PULL_SECONDS_PER_SERIES
-        console.print(
-            Panel(
-                f"Weekly pull estimate: ~{format_duration(est_seconds)} "
-                f"for {total_series} series",
-                border_style="cyan",
-            )
-        )
-        phase_start = time.time()
-        fred = Fred(api_key=os.getenv("API_KEY")) 
-
-
-        for index, series_id in enumerate(series_list, start=1):
-            for attempt in range(DEFAULT_MAX_RETRIES):
-                try:
-                    kwargs = {}
-                    if observation_start:
-                        kwargs["observation_start"] = observation_start
-                    data = pd.DataFrame(fred.get_series(series_id, **kwargs))
-                    data['series'] = series_id
-                    weekly_merged_data = pd.concat([weekly_merged_data, data], axis=0)  # Update merged data
-                    meta = series_meta.get(series_id, {})
-                    title = meta.get("title") or "Unknown series"
-                    popularity = meta.get("popularity")
-                    pop_text = f"popularity={popularity}" if popularity is not None else "popularity=n/a"
-                    insight = build_series_insight(meta)
-                    freq_label = FREQUENCY_LABELS.get(meta.get("frequency_short"), "periodic")
-                    elapsed = time.time() - phase_start
-                    avg_so_far = elapsed / index
-                    eta = max((total_series - index) * avg_so_far, 0)
-                    console.print(
-                        f"[green]{series_id}[/green] ({index}/{total_series}) | "
-                        f"{title} | {freq_label} | {pop_text} | "
-                        f"[dim]{insight}[/dim] | "
-                        f"elapsed={format_duration(elapsed)} | eta={format_duration(eta)}"
-                    )
-                    time.sleep(sleep)
-                    break  # Break out of the retry loop if successful
-
-                except Exception as e:
-                    if is_retryable_exception(e) and attempt < DEFAULT_MAX_RETRIES - 1:
-                        backoff_sleep(attempt)
-                        continue
-                    logger.error(f"Error fetching series {series_id}: {e}")
-                    break
-
-        weekly_merged_data = weekly_merged_data.reset_index()
-        weekly_merged_data = weekly_merged_data.rename(columns={'index': 'date', 0: 'value'})
-        weekly_merged_data.to_csv('weekly_data.csv')
-        total_elapsed = time.time() - phase_start
-        avg_per_series = (total_elapsed / total_series) if total_series else 0
-        console.print(
-            f"[bold green]Weekly series completed[/bold green] | "
-            f"total={format_duration(total_elapsed)} | "
-            f"avg/series={avg_per_series:.2f}s"
+        return _run_series_pull_phase(
+            fred,
+            "weekly",
+            "Weekly",
+            series_list,
+            "weekly_data.csv",
+            series_meta,
+            observation_start,
+            completion_title="Weekly series completed",
         )
 
 
