@@ -1,0 +1,25 @@
+---
+description: Run tests with poetry run pytest after Python or test changes
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Pytest via Poetry
+
+After substantive edits to **Python** or **tests** in this repo:
+
+1. From the **repository root**, run the project-standard test command:
+
+```bash
+poetry run pytest -q
+```
+
+2. For a **faster** pass while iterating, scope to what you changed, for example:
+
+```bash
+poetry run pytest -q test_lazy_fred.py
+```
+
+3. **Live FRED tests** in `test_lazy_fred.py` use `skipif` when `API_KEY` / `FRED_API_KEY` is unset—they **skip**, not fail. To execute them, set the key and re-run.
+
+4. Treat **failing** tests (not skipped) as blocking before finishing unless the user explicitly accepts otherwise.

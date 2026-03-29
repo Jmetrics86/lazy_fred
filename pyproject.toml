@@ -9,6 +9,8 @@ packages = [
     { include = "lazy_fred.py" },
     { include = "wizard.py" },
     { include = "data_store.py" },
+    { include = "panel.py" },
+    { include = "dashboard_app.py" },
 ]
 
 [tool.poetry.dependencies]
@@ -19,6 +21,11 @@ python-dotenv = "^1.0.1"
 fred = "^3.1"
 rich = "^14.3.3"
 inquirerpy = "^0.3.4"
+streamlit = { version = "^1.40.0", optional = true }
+plotly = { version = "^5.24.0", optional = true }
+
+[tool.poetry.extras]
+dashboard = ["streamlit", "plotly"]
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.6"
@@ -29,6 +36,7 @@ hypothesis = "^6.103.0"
 lazy-fred = "lazy_fred:main"
 lazy_fred = "lazy_fred:main"
 lazy-fred-wizard = "wizard:main"
+lazy-fred-dashboard = "dashboard_app:main"
 
 [build-system]
 requires = ["poetry-core"]

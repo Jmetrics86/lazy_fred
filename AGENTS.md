@@ -18,6 +18,8 @@ It is a flat, single-module package managed by Poetry.
 | Full pull | `poetry run lazy-fred full` |
 | Favorites | `poetry run lazy-fred favorites macro` |
 | Notebook UI | `import lazy_fred as lf; lf.launch_notebook_ui("<API_KEY>")` |
+| Analysis dashboard | `poetry install --extras dashboard` then `poetry run lazy-fred-dashboard` (from directory with CSVs) |
+| Panel API | `from panel import load_master_long, build_aligned_panel` (pandas alignment, no Streamlit) |
 
 ## Important notes
 

@@ -1,0 +1,23 @@
+---
+description: Lint Python with poetry run python -m ruff check after edits
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Ruff via Poetry
+
+After substantive edits to **Python** files in this repo:
+
+1. From the **repository root**, run the project-standard lint (whole tree):
+
+```bash
+poetry run python -m ruff check .
+```
+
+2. For a **faster** pass while iterating, you may scope paths you changed (still from repo root), for example:
+
+```bash
+poetry run python -m ruff check lazy_fred.py tests/
+```
+
+3. Fix all reported issues before treating the task as done; do not silence Ruff with blanket `# noqa` unless the project already uses that pattern for the same case.

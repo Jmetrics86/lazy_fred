@@ -1,49 +1,209 @@
 # lazy_fred
 
-Simple FRED data pulls for first-time Python users.
+Simple FRED data pulls for first-time Python users, plus optional alignment, charts, and a guided wizard.
 
-## Quickstart
+## Beginner
+
+**You need**
+
+- **Python** 3.10+
+- A **FRED API key** from [FRED](https://fred.stlouisfed.org/docs/api/api_key.html), set as `API_KEY` or `FRED_API_KEY` (environment variable or `.env`)
+
+**Install**
 
 ```bash
 python -m pip install --upgrade lazy_fred
-lazy-fred doctor
-lazy-fred quick
 ```
 
-If prompted, paste your FRED API key.
+**First run**
 
-## Command reference
+1. Check your setup: `lazy-fred doctor`
+2. Pull a small preset: `lazy-fred quick` (same categories as `favorites macro`)
+
+That writes CSVs such as `daily_data.csv`, `weekly_data.csv`, and `monthly_data.csv` in the current directory. Earlier runs are copied to `backups/<timestamp>/` before overwrite.
+
+**If a command is not found**
+
+Reinstall and open a new terminal: `python -m pip install --upgrade lazy_fred`. For API key problems, confirm the key on FRED and run `lazy-fred doctor`.
+
+---
+
+## Intermediate
+
+### Installation options
+
+**Optional dashboard** (Streamlit + Plotly):
+
+```bash
+python -m pip install "lazy_fred[dashboard]"
+```
+
+**Poetry** (from a clone):
+
+```bash
+poetry install --with dev
+poetry install --extras dashboard   # dashboard only
+```
+
+### `lazy-fred` (main CLI)
 
 | Command | What it does | Best for |
-|---|---|---|
-| `lazy-fred doctor` | Checks Python version, API key, write access, and FRED connectivity | First run/debug |
-| `lazy-fred quick` | Pulls a small popular starter set | Fast validation |
-| `lazy-fred standard` | Pulls a medium default set | Normal usage |
-| `lazy-fred full` | Pulls all default categories | Full dataset |
-| `lazy-fred favorites macro` | Pulls macro favorites | Macro analysis |
-| `lazy-fred favorites rates` | Pulls rates/FX favorites | Rates work |
-| `lazy-fred favorites labor` | Pulls labor favorites | Jobs/labor work |
-| `lazy-fred favorites markets` | Pulls markets favorites | Market signals |
+|---------|----------------|----------|
+| *(no arguments)* | Interactive session: manage category list, `run` / `run-all`, optional start date | Custom category sets |
+| `lazy-fred doctor` | Python version, API key, write access, live FRED ping | First run / debugging |
+| `lazy-fred quick` | Pulls **quick** preset (same categories as `favorites macro`) | Fast validation |
+| `lazy-fred standard` | Pulls first **12** default search categories | Normal usage |
+| `lazy-fred full` | Pulls **all** default search categories | Full default dataset |
+| `lazy-fred favorites <profile>` | Pulls a themed subset (non-interactive) | One-shot themed pulls |
 
-## What you get
+**Favorites profiles** (argument is the profile name):
 
-Output CSV files:
-- `filtered_series.csv`
-- `daily_data.csv`
-- `monthly_data.csv`
-- `weekly_data.csv`
+| Profile | Themes (search categories) |
+|---------|----------------------------|
+| `macro` | gdp, inflation, unemployment, interest rates |
+| `rates` | interest rates, exchange rates, monetary data |
+| `labor` | employment, job opening, labor turnover, income |
+| `markets` | financial indicator, banking, housing, retail trade |
 
-If files already exist, they are auto-backed up to `backups/<timestamp>/`.
+Default profile if omitted: `macro` (i.e. `lazy-fred favorites` → `lazy-fred favorites macro`).
 
-## Time and retry behavior
+Interactive menu shortcuts: `a` add, `r` remove, `c` clear, `rs` reset defaults, `run`, `run-all`, `q` quit. You can set an **observation start date** when prompted for `run` / `run-all`.
+
+### `lazy-fred-wizard`
+
+Guided **Rich** + **InquirerPy** flow: API key → search/select series → lookback → confirm → fetch and write CSVs. Optionally stores runs in a local **SQLite** database (`lazy_fred_history.db`), reconciles revised FRED values, and saves named configs under `.lazy_fred_configs/` for reuse.
+
+```bash
+lazy-fred-wizard
+# or: python -m wizard
+```
+
+### `lazy-fred-dashboard`
+
+Streamlit app for exploring **already pulled** CSVs in a directory.
+
+```bash
+lazy-fred-dashboard
+```
+
+Requires the `[dashboard]` extra. From the directory that contains your CSVs, start the app and use the sidebar for paths, alignment options, and series selection.
+
+**Sidebar**
+
+- Working directory (where `daily_data.csv` / `weekly_data.csv` / `monthly_data.csv` live)
+- Target frequency: Daily / Weekly / Monthly / Quarterly
+- Downsample aggregation: `last`, `mean`, `sum`
+- Upsample method: `ffill`, `linear`
+- Optional date range filter
+- Series display scale: **levels**, **index_100** (rebase to 100), **yoy_pct** (year-over-year %)
+- Multiselect series; button to save **`aligned_master.csv`** (wide)
+
+**Tabs**
+
+- **Time series** — Plotly lines for selected series
+- **Correlation** — Heatmap of pairwise correlations
+- **Scatter** — Choose X/Y series, scatter + OLS fit line
+
+### Python API (`import lazy_fred`)
+
+| Symbol | Role |
+|--------|------|
+| `run_fred_data_collection(api_key, ...)` | Core pull: `categories=`, `interactive=True/False`, `observation_start=` (ISO date string) |
+| `run_starter_mode(api_key, mode)` | `mode` ∈ `quick`, `standard`, `full` |
+| `run_favorites(api_key, profile)` | `profile` ∈ `macro`, `rates`, `labor`, `markets` |
+| `run_doctor()` | Same checks as CLI doctor |
+| `launch_notebook_ui(api_key=None)` | Widget UI in Jupyter/Colab (needs `ipywidgets`) |
+| `main` | CLI entry used by `lazy-fred` |
+| `AccessFred`, `CollectCategories` | Lower-level building blocks for custom workflows/tests |
+
+Example:
+
+```python
+import os
+import lazy_fred as lf
+
+api_key = os.environ["API_KEY"]
+lf.run_favorites(api_key, "rates")
+# or
+lf.run_fred_data_collection(
+    api_key,
+    categories=["gdp", "inflation"],
+    interactive=False,
+    observation_start="2010-01-01",
+)
+```
+
+### `panel` module (aligned master data)
+
+Scriptable alignment **without** Streamlit. Uses `daily_data.csv`, `weekly_data.csv`, `monthly_data.csv`, and optional `filtered_series.csv` metadata.
+
+| Function | Purpose |
+|----------|---------|
+| `read_filtered_metadata(path)` | Load `filtered_series.csv` metadata |
+| `load_master_long(base_dir, ...)` | Combine long CSVs + optional metadata |
+| `build_aligned_panel(master_long, target_freq, ...)` | Wide panel: rows = dates at target **D** / **W** / **M** / **Q**; `reducer` `last`/`mean`/`sum`; `upsample_method` `ffill`/`linear`; optional `start`/`end`/`series_ids` |
+| `wide_to_long(wide)` | Stack wide → long |
+| `write_aligned_master_csv(wide, path, long_format=False)` | Write aligned CSV |
+| `correlation_matrix(wide, min_periods=2)` | Pearson correlation matrix |
+
+Example:
+
+```python
+from panel import load_master_long, build_aligned_panel, write_aligned_master_csv
+
+master = load_master_long(".")
+wide = build_aligned_panel(master, "M", reducer="last", upsample_method="ffill")
+write_aligned_master_csv(wide, "aligned_master.csv")
+```
+
+### Output files
+
+| File / path | Description |
+|-------------|-------------|
+| `filtered_series.csv` | Series metadata from the search phase |
+| `daily_data.csv`, `weekly_data.csv`, `monthly_data.csv` | Long-format observations (`date`, `series`, `value`) |
+| `backups/<timestamp>/` | Prior copies of the main CSVs before overwrite |
+| `pull_failures.csv` | Rows for series that could not be fully pulled (if any) |
+| `app.log` | Debug log from the main CLI module |
+
+**Wizard-only (current directory)**
+
+- `lazy_fred_history.db` — SQLite run and observation history
+- `.lazy_fred_configs/` — Saved named configurations
+
+### Troubleshooting
+
+- **Colab function missing** — Install latest from GitHub (see Advanced) and restart runtime
+- **Run seems slow** — Expected for large pulls under FRED quotas; try `quick` or a `favorites` profile first
+- **Dashboard import error** — Install with the `[dashboard]` extra
+
+---
+
+## Advanced
+
+### Capabilities at a glance
+
+| Area | What it does |
+|------|----------------|
+| **Main CLI** (`lazy-fred`) | Health check, preset pulls, themed “favorites,” or a full **interactive** menu to add/remove categories and run collection |
+| **Wizard** (`lazy-fred-wizard`) | Step-by-step pick of series, lookback, CSV export, optional **SQLite** history and saved configs |
+| **Library** (`import lazy_fred`) | Programmatic pulls, doctor, starter/favorites modes, **Jupyter/Colab** widget UI |
+| **`panel` module** | Load CSV outputs into one long table, **align** mixed D/W/M (and Q) frequencies, correlations, export aligned CSV |
+| **Dashboard** (`lazy-fred-dashboard`) | **Streamlit** UI: aligned panel, time series, correlation heatmap, scatter + OLS line, display scaling |
+
+### Panel alignment conventions
+
+Weekly alignment uses `W-SUN`; monthly uses month-end (`ME`); quarterly uses quarter-end (`QE-DEC`). Upsampling forward-fills (or linear interpolation) until the next observation; downsampling uses your chosen reducer.
+
+The legacy script [`mergefred.py`](mergefred.py) is superseded by [`panel.py`](panel.py) for reproducible alignment.
+
+### Time and retry behavior
 
 - Terminal shows estimate, elapsed time, and ETA while running.
-- API calls use exponential backoff retries for rate limits/transient errors.
-- You can choose a start date in:
-  - terminal prompt before `run`/`run-all`
-  - notebook date picker in Colab UI
+- API calls use **exponential backoff** for rate limits and transient errors.
+- Start date: interactive prompts for `run` / `run-all`, or pass `observation_start` / notebook date picker when using the API or Colab UI.
 
-## Colab UI
+### Colab / Jupyter UI
 
 ```python
 !pip install -U lazy_fred ipywidgets
@@ -53,27 +213,12 @@ from google.colab import userdata
 lf.launch_notebook_ui(userdata.get("fred_api_key"))
 ```
 
-If `launch_notebook_ui` is missing in Colab:
+If `launch_notebook_ui` is missing in Colab, install the latest package or source:
 
 ```python
 !pip install -U "git+https://github.com/Jmetrics86/lazy_fred.git"
 ```
 
-## Troubleshooting
-
-- **Command not found**
-  - Reinstall and open a new terminal:
-  - `python -m pip install --upgrade lazy_fred`
-- **API key errors**
-  - Confirm key is valid and active on FRED.
-  - Run `lazy-fred doctor`.
-- **Colab function missing**
-  - Install latest from GitHub (command above) and restart runtime.
-- **Run seems slow**
-  - This is expected for large pulls due to FRED quotas.
-  - Use `quick` or a favorites profile first.
-
 ## License
 
 MIT
-
