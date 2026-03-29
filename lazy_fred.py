@@ -105,6 +105,7 @@ def backoff_sleep(attempt, initial_wait=DEFAULT_INITIAL_BACKOFF_SECONDS):
 
 
 PULL_FAILURES_CSV = "pull_failures.csv"
+MASTER_OUTPUT_CSV = "master_data.csv"
 
 
 def _series_observations_present(data: pd.DataFrame) -> bool:
@@ -329,6 +330,211 @@ def prompt_start_date():
     return parse_start_date(raw)
 
 
+def parse_master_cli_args(args):
+    """
+    Parse CLI args for `lazy-fred master`.
+
+    Supported:
+      --start YYYY-MM-DD | --start=YYYY-MM-DD | -s YYYY-MM-DD
+      --out FILE.csv     | --out=FILE.csv     | -o FILE.csv
+    """
+    observation_start = None
+    output_path = MASTER_OUTPUT_CSV
+
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        lower = token.lower()
+
+        if lower in {"--start", "-s"}:
+            if idx + 1 >= len(args):
+                raise ValueError("Missing value for --start. Use YYYY-MM-DD.")
+            observation_start = parse_start_date(args[idx + 1])
+            idx += 2
+            continue
+
+        if lower.startswith("--start="):
+            observation_start = parse_start_date(token.split("=", 1)[1])
+            idx += 1
+            continue
+
+        if lower in {"--out", "-o"}:
+            if idx + 1 >= len(args):
+                raise ValueError("Missing value for --out.")
+            output_path = str(args[idx + 1]).strip()
+            if not output_path:
+                raise ValueError("Output path cannot be empty.")
+            idx += 2
+            continue
+
+        if lower.startswith("--out="):
+            output_path = token.split("=", 1)[1].strip()
+            if not output_path:
+                raise ValueError("Output path cannot be empty.")
+            idx += 1
+            continue
+
+        raise ValueError(
+            f"Unknown argument '{token}'. "
+            "Use: lazy-fred master [--start YYYY-MM-DD] [--out master_data.csv]"
+        )
+
+    return observation_start, output_path
+
+
+def _read_master_input_csv(path, native_freq):
+    if not os.path.isfile(path):
+        return pd.DataFrame(columns=["date", "series", "value", "native_freq"])
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame(columns=["date", "series", "value", "native_freq"])
+
+    if df.empty:
+        return pd.DataFrame(columns=["date", "series", "value", "native_freq"])
+
+    rename = {}
+    if "date" not in df.columns and "index" in df.columns:
+        rename["index"] = "date"
+    if rename:
+        df = df.rename(columns=rename)
+
+    required = {"date", "series", "value"}
+    if not required.issubset(df.columns):
+        return pd.DataFrame(columns=["date", "series", "value", "native_freq"])
+
+    out = df[["date", "series", "value"]].copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
+    out = out.dropna(subset=["date", "series"])
+    out["series"] = out["series"].astype(str)
+    out["native_freq"] = native_freq
+    return out
+
+
+def _metadata_row_to_insight_payload(row):
+    def _as_text(value):
+        if pd.isna(value):
+            return ""
+        return str(value).strip()
+
+    popularity = row.get("popularity")
+    try:
+        popularity = int(popularity)
+    except Exception:
+        popularity = None
+
+    return {
+        "title": _as_text(row.get("title")),
+        "popularity": popularity,
+        "frequency_short": _as_text(row.get("frequency_short")),
+        "units_short": _as_text(row.get("units_short")),
+        "seasonal_adjustment_short": _as_text(row.get("seasonal_adjustment_short")),
+    }
+
+
+def build_master_dataset(base_dir=".", output_path=MASTER_OUTPUT_CSV):
+    """
+    Build one long-form master CSV from daily/weekly/monthly outputs.
+
+    The result includes series metadata (when ``filtered_series.csv`` is present)
+    and a plain-language ``series_description`` column to improve readability.
+    """
+    base_dir = str(base_dir)
+    parts = [
+        _read_master_input_csv(os.path.join(base_dir, "daily_data.csv"), "D"),
+        _read_master_input_csv(os.path.join(base_dir, "weekly_data.csv"), "W"),
+        _read_master_input_csv(os.path.join(base_dir, "monthly_data.csv"), "M"),
+    ]
+    master = pd.concat([p for p in parts if not p.empty], ignore_index=True)
+
+    if master.empty:
+        master = pd.DataFrame(
+            columns=[
+                "date",
+                "series",
+                "value",
+                "native_freq",
+                "title",
+                "frequency_short",
+                "units_short",
+                "seasonal_adjustment_short",
+                "popularity",
+                "series_description",
+            ]
+        )
+    else:
+        master = master.sort_values(["series", "date"]).drop_duplicates(
+            subset=["series", "date"], keep="last"
+        )
+
+        meta_path = os.path.join(base_dir, "filtered_series.csv")
+        try:
+            meta = pd.read_csv(meta_path)
+        except Exception:
+            meta = pd.DataFrame()
+
+        if not meta.empty and "id" in meta.columns:
+            keep = [
+                c
+                for c in [
+                    "id",
+                    "title",
+                    "frequency_short",
+                    "units_short",
+                    "seasonal_adjustment_short",
+                    "popularity",
+                ]
+                if c in meta.columns
+            ]
+            if keep:
+                meta = meta[keep].copy()
+                meta["series_description"] = meta.apply(
+                    lambda row: build_series_insight(_metadata_row_to_insight_payload(row)),
+                    axis=1,
+                )
+                master = master.merge(
+                    meta.rename(columns={"id": "series"}), on="series", how="left"
+                )
+
+        master = master.sort_values(["series", "date"]).reset_index(drop=True)
+        master["date"] = master["date"].dt.strftime("%Y-%m-%d")
+
+    output_path = str(output_path).strip() or MASTER_OUTPUT_CSV
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    master.to_csv(output_path, index=False)
+    return master
+
+
+def run_master_bundle(api_key=None, observation_start=None, output_path=MASTER_OUTPUT_CSV):
+    """
+    Beginner one-shot flow:
+    1) run full default pull
+    2) write metadata-enriched ``master_data.csv`` long table
+    """
+    if observation_start:
+        observation_start = parse_start_date(observation_start)
+
+    run_fred_data_collection(
+        api_key,
+        categories=STARTER_MODES["full"],
+        interactive=False,
+        observation_start=observation_start,
+    )
+    master = build_master_dataset(output_path=output_path)
+    console.print(
+        Panel(
+            f"[green]Master dataset written:[/green] {output_path}\n"
+            f"Rows: {len(master)} | Columns: {len(master.columns)}",
+            title="master export complete",
+            border_style="green",
+        )
+    )
+    return master
+
+
 def resolve_categories(user_categories):
     """Resolve user-provided category text against default categories."""
     resolved = []
@@ -484,6 +690,7 @@ def backup_existing_outputs():
         "daily_data.csv",
         "monthly_data.csv",
         "weekly_data.csv",
+        MASTER_OUTPUT_CSV,
     ]
     existing = [f for f in output_files if os.path.exists(f)]
     if not existing:
@@ -886,12 +1093,12 @@ def run_fred_data_collection(api_key, categories=None, interactive=True, observa
             console.print("[yellow]Invalid input. Please choose a valid action.[/yellow]")
 
 def main():
-    args = [a.strip().lower() for a in sys.argv[1:]]
+    args = [a.strip() for a in sys.argv[1:]]
     if not args:
         run_fred_data_collection(os.getenv("API_KEY"))
         return
 
-    cmd = args[0]
+    cmd = args[0].lower()
     if cmd == "doctor":
         run_doctor()
     elif cmd in STARTER_MODES:
@@ -899,10 +1106,22 @@ def main():
     elif cmd == "favorites":
         profile = args[1] if len(args) > 1 else "macro"
         run_favorites(os.getenv("API_KEY"), profile)
+    elif cmd == "master":
+        try:
+            observation_start, output_path = parse_master_cli_args(args[1:])
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return
+        run_master_bundle(
+            os.getenv("API_KEY"),
+            observation_start=observation_start,
+            output_path=output_path,
+        )
     else:
         console.print(
             "[yellow]Unknown command.[/yellow] "
-            "Use: doctor | quick | standard | full | favorites <profile>"
+            "Use: doctor | quick | standard | full | favorites <profile> | "
+            "master [--start YYYY-MM-DD] [--out master_data.csv]"
         )
 
 

@@ -278,3 +278,69 @@ def test_execute_collection_writes_pull_failures_aggregate(tmp_path, monkeypatch
     assert fails.iloc[0]["series_id"] == "M1"
     assert fails.iloc[0]["phase"] == "monthly"
 
+
+def test_build_master_dataset_builds_enriched_long_csv(tmp_path):
+    lf = _lf()
+
+    pd.DataFrame(
+        [
+            {
+                "id": "D1",
+                "title": "Daily series",
+                "frequency_short": "D",
+                "units_short": "Index",
+                "popularity": 88,
+                "seasonal_adjustment_short": "SA",
+            },
+            {
+                "id": "M1",
+                "title": "Monthly series",
+                "frequency_short": "M",
+                "units_short": "Percent",
+                "popularity": 77,
+                "seasonal_adjustment_short": "NSA",
+            },
+        ]
+    ).to_csv(tmp_path / "filtered_series.csv", index=False)
+
+    pd.DataFrame(
+        [
+            {"date": "2020-01-01", "series": "D1", "value": 1.0},
+            {"date": "2020-01-02", "series": "D1", "value": 2.0},
+        ]
+    ).to_csv(tmp_path / "daily_data.csv", index=False)
+    pd.DataFrame(
+        [{"date": "2020-01-31", "series": "M1", "value": 3.0}]
+    ).to_csv(tmp_path / "monthly_data.csv", index=False)
+    pd.DataFrame(columns=["date", "series", "value"]).to_csv(
+        tmp_path / "weekly_data.csv", index=False
+    )
+
+    out_path = tmp_path / "master_data.csv"
+    lf.build_master_dataset(base_dir=tmp_path, output_path=out_path)
+
+    assert out_path.is_file()
+    out = pd.read_csv(out_path)
+    assert {"date", "series", "value", "native_freq", "title", "units_short"}.issubset(
+        out.columns
+    )
+    assert len(out) == 3
+    assert set(out["series"]) == {"D1", "M1"}
+
+
+def test_parse_master_cli_args_supports_start_and_out():
+    lf = _lf()
+    start, out = lf.parse_master_cli_args(["--start", "2020-01-01", "--out", "x.csv"])
+    assert start == "2020-01-01"
+    assert out == "x.csv"
+
+    start2, out2 = lf.parse_master_cli_args(["--start=2021-02-03", "--out=y.csv"])
+    assert start2 == "2021-02-03"
+    assert out2 == "y.csv"
+
+
+def test_parse_master_cli_args_invalid_token():
+    lf = _lf()
+    with pytest.raises(ValueError):
+        lf.parse_master_cli_args(["--bogus"])
+
