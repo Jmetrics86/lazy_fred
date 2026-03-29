@@ -55,6 +55,7 @@ poetry install --extras dashboard   # dashboard only
 | `lazy-fred standard` | Pulls first **12** default search categories | Normal usage |
 | `lazy-fred full` | Pulls **all** default search categories | Full default dataset |
 | `lazy-fred favorites <profile>` | Pulls a themed subset (non-interactive) | One-shot themed pulls |
+| `lazy-fred master [--start YYYY-MM-DD] [--out master_data.csv]` | Full default pull + one metadata-enriched long CSV | Easiest all-in-one export |
 
 **Favorites profiles** (argument is the profile name):
 
@@ -66,6 +67,16 @@ poetry install --extras dashboard   # dashboard only
 | `markets` | financial indicator, banking, housing, retail trade |
 
 Default profile if omitted: `macro` (i.e. `lazy-fred favorites` → `lazy-fred favorites macro`).
+
+**One-shot master export** (great for new users):
+
+```bash
+lazy-fred master
+# optional
+lazy-fred master --start 2010-01-01 --out all_series_master.csv
+```
+
+This command runs the **full** default category pull and writes a single long file (default: `master_data.csv`) with observation rows plus metadata columns from `filtered_series.csv`, including a plain-language `series_description`.
 
 Interactive menu shortcuts: `a` add, `r` remove, `c` clear, `rs` reset defaults, `run`, `run-all`, `q` quit. You can set an **observation start date** when prompted for `run` / `run-all`.
 
@@ -112,6 +123,7 @@ Requires the `[dashboard]` extra. From the directory that contains your CSVs, st
 | `run_starter_mode(api_key, mode)` | `mode` ∈ `quick`, `standard`, `full` |
 | `run_favorites(api_key, profile)` | `profile` ∈ `macro`, `rates`, `labor`, `markets` |
 | `run_doctor()` | Same checks as CLI doctor |
+| `run_master_bundle(api_key, ...)` | One-shot full pull + metadata-enriched `master_data.csv` |
 | `launch_notebook_ui(api_key=None)` | Widget UI in Jupyter/Colab (needs `ipywidgets`) |
 | `main` | CLI entry used by `lazy-fred` |
 | `AccessFred`, `CollectCategories` | Lower-level building blocks for custom workflows/tests |
