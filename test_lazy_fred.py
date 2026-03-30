@@ -344,3 +344,34 @@ def test_parse_master_cli_args_invalid_token():
     with pytest.raises(ValueError):
         lf.parse_master_cli_args(["--bogus"])
 
+
+def test_show_cli_intro_prints_intro_and_commands(monkeypatch):
+    lf = _lf()
+    printed = []
+
+    monkeypatch.setattr(lf.console, "print", lambda *a, **k: printed.append(a))
+
+    lf.show_cli_intro()
+
+    assert len(printed) == 2
+    assert "CAPE quick intro" in str(printed[0][0])
+    assert "Available Commands" in str(printed[1][0])
+
+
+def test_main_without_args_shows_intro_then_runs_collection(monkeypatch):
+    lf = _lf()
+    calls = []
+
+    monkeypatch.setattr(lf.sys, "argv", ["lazy-fred"])
+    monkeypatch.setenv("API_KEY", "env-key")
+    monkeypatch.setattr(lf, "show_cli_intro", lambda: calls.append(("intro", None)))
+    monkeypatch.setattr(
+        lf,
+        "run_fred_data_collection",
+        lambda key, **kwargs: calls.append(("run", key)),
+    )
+
+    lf.main()
+
+    assert calls == [("intro", None), ("run", "env-key")]
+

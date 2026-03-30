@@ -72,6 +72,37 @@ def render_menu():
     )
 
 
+def render_cli_commands_table():
+    table = Table(title="Available Commands")
+    table.add_column("Command", style="cyan")
+    table.add_column("Description", style="green")
+    table.add_row("lazy-fred", "Show this intro, then launch interactive category menu")
+    table.add_row("lazy-fred doctor", "Run environment and FRED connectivity checks")
+    table.add_row("lazy-fred quick", "Run quick starter pull (macro favorites)")
+    table.add_row("lazy-fred standard", "Run first 12 default categories")
+    table.add_row("lazy-fred full", "Run all default categories")
+    table.add_row("lazy-fred favorites <profile>", "Run one favorites profile: macro|rates|labor|markets")
+    table.add_row(
+        "lazy-fred master [--start YYYY-MM-DD] [--out master_data.csv]",
+        "Run full pull and write one master long CSV",
+    )
+    return table
+
+
+def show_cli_intro():
+    console.print(
+        Panel(
+            "[bold]CAPE quick intro[/bold]\n"
+            "CAPE (Cyclically Adjusted Price-to-Earnings, also called Shiller P/E) compares\n"
+            "today's market price level to roughly 10 years of inflation-adjusted earnings.\n"
+            "It is commonly used as a long-cycle valuation context signal, not as a short-term timer.",
+            title="Welcome to lazy_fred",
+            border_style="magenta",
+        )
+    )
+    console.print(render_cli_commands_table())
+
+
 def format_duration(seconds):
     seconds = max(0, int(seconds))
     minutes, sec = divmod(seconds, 60)
@@ -1095,6 +1126,7 @@ def run_fred_data_collection(api_key, categories=None, interactive=True, observa
 def main():
     args = [a.strip() for a in sys.argv[1:]]
     if not args:
+        show_cli_intro()
         run_fred_data_collection(os.getenv("API_KEY"))
         return
 
