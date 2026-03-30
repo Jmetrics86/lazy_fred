@@ -24,8 +24,6 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -66,11 +64,6 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.publish_method == 'trusted'
     needs: verify
     runs-on: ubuntu-latest
-    env:
-      # Opt-in to Node.js 24 for GitHub-hosted JavaScript actions.
-      # This avoids Node.js 20 deprecation warnings and future breakage.
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -100,8 +93,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
