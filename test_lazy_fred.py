@@ -354,8 +354,13 @@ def test_show_cli_intro_prints_intro_and_commands(monkeypatch):
     lf.show_cli_intro()
 
     assert len(printed) == 2
-    assert "CAPE quick intro" in str(printed[0][0])
-    assert "Available Commands" in str(printed[1][0])
+    intro_panel = printed[0][0]
+    commands_table = printed[1][0]
+
+    assert getattr(intro_panel, "title", "") == "Welcome to lazy_fred"
+    assert "CAPE quick intro" in str(intro_panel.renderable)
+    assert getattr(commands_table, "title", "") == "Available Commands"
+    assert len(commands_table.rows) >= 7
 
 
 def test_main_without_args_shows_intro_then_runs_collection(monkeypatch):
