@@ -17,12 +17,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 Reducer = Literal["last", "mean", "sum"]
 UpsampleMethod = Literal["ffill", "linear"]
 TargetFreq = Literal["D", "W", "M", "Q"]
-NativeFreq = Literal["D", "W", "M"]
+NativeFreq = Literal["D", "W", "M", "Q"]
+FillMethod = Literal["none", "ffill", "bfill", "ffill_bfill", "interpolate"]
 
 _FREQ_PANDAS: dict[str, str] = {
     "D": "D",
@@ -33,6 +35,12 @@ _FREQ_PANDAS: dict[str, str] = {
 
 # Finer frequencies have lower rank (for comparing native vs target).
 _FREQ_RANK: dict[str, int] = {"D": 0, "W": 1, "M": 2, "Q": 3}
+_PERIOD_FREQ: dict[str, str] = {
+    "D": "D",
+    "W": "W-SUN",
+    "M": "M",
+    "Q": "Q-DEC",
+}
 
 _META_COLS = [
     "id",
@@ -42,6 +50,33 @@ _META_COLS = [
     "popularity",
     "seasonal_adjustment_short",
 ]
+
+
+def _normalize_native_freq(raw: object) -> str | None:
+    """
+    Normalize frequency labels to one of D/W/M/Q.
+
+    Supports short codes (e.g. ``M``) and common long names
+    (e.g. ``monthly``).
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip().upper()
+    if not text:
+        return None
+    direct = {"D", "W", "M", "Q"}
+    if text in direct:
+        return text
+    aliases = {
+        "DAILY": "D",
+        "WEEKLY": "W",
+        "WEEK": "W",
+        "MONTHLY": "M",
+        "MONTH": "M",
+        "QUARTERLY": "Q",
+        "QUARTER": "Q",
+    }
+    return aliases.get(text)
 
 
 def read_filtered_metadata(path: str | Path) -> pd.DataFrame:
@@ -222,6 +257,207 @@ def build_aligned_panel(
     wide = pd.DataFrame(columns, index=full_index)
     wide.index.name = "date"
     return wide
+
+
+def _series_to_daily_even(s: pd.Series, native: str) -> pd.Series:
+    """
+    Convert one time series to daily values.
+
+    - Daily native values stay on their native dates.
+    - Weekly / monthly / quarterly values are treated as period totals and
+      distributed evenly across all days in each period.
+    """
+    s = s.sort_index()
+    s = s[~s.index.duplicated(keep="last")]
+    s = s.dropna()
+    if s.empty:
+        return pd.Series(dtype="float64")
+
+    if native == "D":
+        out = s.copy()
+        out.index = pd.DatetimeIndex(out.index).normalize()
+        return out.groupby(level=0).sum().sort_index()
+
+    period_freq = _PERIOD_FREQ[native]
+    parts: list[pd.Series] = []
+    for ts, value in s.items():
+        period = pd.Timestamp(ts).to_period(period_freq)
+        start = period.start_time.normalize()
+        end = period.end_time.normalize()
+        days = pd.date_range(start, end, freq="D")
+        if days.empty:
+            continue
+        per_day = float(value) / float(len(days))
+        parts.append(pd.Series(per_day, index=days, dtype="float64"))
+
+    if not parts:
+        return pd.Series(dtype="float64")
+    out = pd.concat(parts)
+    return out.groupby(level=0).sum().sort_index()
+
+
+def _optimize_for_modeling(
+    long_df: pd.DataFrame,
+    *,
+    as_wide: bool,
+    fill_method: FillMethod,
+) -> pd.DataFrame:
+    """Apply modeling-friendly dtype and memory optimizations."""
+    out = long_df.copy()
+    if out.empty:
+        if as_wide:
+            return pd.DataFrame()
+        return pd.DataFrame(columns=["date", "series", "value"])
+
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out["series"] = out["series"].astype(str)
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
+    out = out.dropna(subset=["date", "series", "value"])
+    out = out.sort_values(["date", "series"]).reset_index(drop=True)
+
+    wide = out.pivot_table(index="date", columns="series", values="value", aggfunc="last")
+    wide = wide.sort_index()
+    wide.columns.name = "series"
+    wide.index.name = "date"
+
+    if fill_method == "ffill":
+        wide = wide.ffill()
+    elif fill_method == "bfill":
+        wide = wide.bfill()
+    elif fill_method == "ffill_bfill":
+        wide = wide.ffill().bfill()
+    elif fill_method == "interpolate":
+        wide = wide.interpolate(method="time", limit_direction="both")
+
+    if as_wide:
+        cols = list(wide.columns)
+        arr = np.ascontiguousarray(wide.to_numpy(dtype=np.float32))
+        optimized = pd.DataFrame(arr, index=wide.index, columns=cols)
+        optimized.index.name = "date"
+        return optimized
+
+    long_out = wide.stack().reset_index(name="value")
+    long_out = long_out.dropna(subset=["value"])
+    long_out["series"] = long_out["series"].astype("category")
+    long_out["value"] = long_out["value"].astype("float32")
+    return long_out
+
+
+def transform_master_timeframe(
+    master_long: pd.DataFrame,
+    target_freq: TargetFreq,
+    *,
+    start: pd.Timestamp | str | None = None,
+    end: pd.Timestamp | str | None = None,
+    reducer: Reducer = "sum",
+    series_ids: list[str] | None = None,
+    distribute_for_daily: bool = True,
+    optimize_for_modeling: bool = True,
+    as_wide: bool = False,
+    fill_method: FillMethod = "none",
+) -> pd.DataFrame:
+    """
+    Transform mixed-frequency master data to one target timeframe.
+
+    Key behavior:
+    - For target ``D`` with ``distribute_for_daily=True``, weekly/monthly/quarterly
+      observations are split evenly across all days in each source period.
+    - For target ``W`` / ``M`` / ``Q``, all series are rolled up by ``reducer``.
+
+    The returned frame is long format (``date``, ``series``, ``value``) by
+    default. Set ``as_wide=True`` for modeling-ready matrix output
+    (index=date, columns=series).
+    """
+    if target_freq not in _FREQ_PANDAS:
+        raise ValueError("target_freq must be one of: D, W, M, Q")
+    if reducer not in {"last", "mean", "sum"}:
+        raise ValueError("reducer must be one of: last, mean, sum")
+    if fill_method not in {"none", "ffill", "bfill", "ffill_bfill", "interpolate"}:
+        raise ValueError(
+            "fill_method must be one of: none, ffill, bfill, ffill_bfill, interpolate"
+        )
+    if master_long.empty:
+        return pd.DataFrame() if as_wide else pd.DataFrame(columns=["date", "series", "value"])
+
+    df = master_long.copy()
+    required = {"date", "series", "value"}
+    if not required.issubset(df.columns):
+        missing = ", ".join(sorted(required - set(df.columns)))
+        raise ValueError(f"master_long missing required columns: {missing}")
+
+    if "native_freq" not in df.columns:
+        if "frequency_short" in df.columns:
+            df["native_freq"] = df["frequency_short"]
+        else:
+            df["native_freq"] = target_freq
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["series"] = df["series"].astype(str)
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df["native_freq"] = df["native_freq"].map(_normalize_native_freq)
+    df = df.dropna(subset=["date", "series", "value", "native_freq"])
+
+    if series_ids is not None:
+        want = set(series_ids)
+        df = df[df["series"].isin(want)]
+    if df.empty:
+        return pd.DataFrame() if as_wide else pd.DataFrame(columns=["date", "series", "value"])
+
+    start_ts = pd.Timestamp(start) if start is not None else df["date"].min()
+    end_ts = pd.Timestamp(end) if end is not None else df["date"].max()
+    if start_ts > end_ts:
+        raise ValueError("start must be <= end")
+
+    if not distribute_for_daily:
+        wide = build_aligned_panel(
+            df,
+            target_freq,
+            start=start_ts,
+            end=end_ts,
+            reducer=reducer,
+            upsample_method="ffill",
+            series_ids=series_ids,
+        )
+        long_fallback = wide_to_long(wide)
+        if optimize_for_modeling:
+            return _optimize_for_modeling(
+                long_fallback, as_wide=as_wide, fill_method=fill_method
+            )
+        if as_wide:
+            return wide
+        return long_fallback
+
+    daily_idx = pd.date_range(start_ts.normalize(), end_ts.normalize(), freq="D")
+    agg = {"last": "last", "mean": "mean", "sum": "sum"}[reducer]
+
+    series_outputs: list[pd.DataFrame] = []
+    for sid, g in df.groupby("series"):
+        native = str(g["native_freq"].iloc[0])
+        s = pd.Series(g["value"].values, index=pd.DatetimeIndex(g["date"]), dtype="float64")
+        daily = _series_to_daily_even(s, native)
+        if daily.empty:
+            continue
+        daily = daily.reindex(daily_idx)
+
+        if target_freq == "D":
+            values = daily
+        else:
+            values = daily.resample(_FREQ_PANDAS[target_freq]).agg(agg)
+
+        part = pd.DataFrame({"date": values.index, "series": sid, "value": values.values})
+        series_outputs.append(part)
+
+    if not series_outputs:
+        return pd.DataFrame() if as_wide else pd.DataFrame(columns=["date", "series", "value"])
+
+    out = pd.concat(series_outputs, ignore_index=True)
+    out = out.sort_values(["date", "series"]).reset_index(drop=True)
+
+    if optimize_for_modeling:
+        return _optimize_for_modeling(out, as_wide=as_wide, fill_method=fill_method)
+    if as_wide:
+        return out.pivot(index="date", columns="series", values="value").sort_index()
+    return out
 
 
 def wide_to_long(wide: pd.DataFrame) -> pd.DataFrame:

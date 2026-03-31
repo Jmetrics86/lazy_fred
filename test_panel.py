@@ -8,6 +8,7 @@ from panel import (
     build_aligned_panel,
     correlation_matrix,
     load_master_long,
+    transform_master_timeframe,
     wide_to_long,
     write_aligned_master_csv,
 )
@@ -102,3 +103,84 @@ def test_wide_to_long_roundtrip(tmp_path: Path):
     p = tmp_path / "out.csv"
     write_aligned_master_csv(wide, p, long_format=True)
     assert p.is_file()
+
+
+def test_transform_master_timeframe_daily_even_allocation():
+    master = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2020-01-31"]),
+            "series": ["M1"],
+            "value": [310.0],
+            "native_freq": ["M"],
+        }
+    )
+
+    daily = transform_master_timeframe(
+        master,
+        target_freq="D",
+        start="2020-01-01",
+        end="2020-01-31",
+        distribute_for_daily=True,
+        optimize_for_modeling=False,
+    )
+
+    assert len(daily) == 31
+    assert daily["value"].notna().sum() == 31
+    assert abs(daily["value"].iloc[0] - 10.0) < 1e-9
+    assert abs(daily["value"].sum() - 310.0) < 1e-9
+
+
+def test_transform_master_timeframe_rollup_week_month_quarter():
+    dates = pd.date_range("2020-01-01", "2020-03-31", freq="D")
+    master = pd.DataFrame(
+        {
+            "date": dates,
+            "series": ["D1"] * len(dates),
+            "value": [1.0] * len(dates),
+            "native_freq": ["D"] * len(dates),
+        }
+    )
+
+    weekly = transform_master_timeframe(
+        master,
+        target_freq="W",
+        reducer="sum",
+        optimize_for_modeling=False,
+    )
+    monthly = transform_master_timeframe(
+        master,
+        target_freq="M",
+        reducer="sum",
+        optimize_for_modeling=False,
+    )
+    quarterly = transform_master_timeframe(
+        master,
+        target_freq="Q",
+        reducer="sum",
+        optimize_for_modeling=False,
+    )
+
+    assert abs(weekly["value"].sum() - 91.0) < 1e-9
+    jan = monthly[monthly["date"] == pd.Timestamp("2020-01-31")]["value"].iloc[0]
+    feb = monthly[monthly["date"] == pd.Timestamp("2020-02-29")]["value"].iloc[0]
+    mar = monthly[monthly["date"] == pd.Timestamp("2020-03-31")]["value"].iloc[0]
+    assert jan == 31.0 and feb == 29.0 and mar == 31.0
+    q1 = quarterly[quarterly["date"] == pd.Timestamp("2020-03-31")]["value"].iloc[0]
+    assert q1 == 91.0
+
+
+def test_transform_master_timeframe_optimize_for_modeling():
+    master = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2020-01-01", "2020-01-02"]),
+            "series": ["S1", "S1"],
+            "value": [1.0, 2.0],
+            "native_freq": ["D", "D"],
+        }
+    )
+    out = transform_master_timeframe(master, target_freq="D")
+
+    assert list(out.columns) == ["date", "series", "value"]
+    assert str(out["series"].dtype) == "category"
+    assert str(out["value"].dtype) == "float32"
+    assert pd.api.types.is_datetime64_any_dtype(out["date"])
