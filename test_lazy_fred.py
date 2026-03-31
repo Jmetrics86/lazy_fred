@@ -358,7 +358,7 @@ def test_show_cli_intro_prints_intro_and_commands(monkeypatch):
     commands_table = printed[1][0]
 
     assert getattr(intro_panel, "title", "") == "Welcome to lazy_fred"
-    assert "CAPE quick intro" in str(intro_panel.renderable)
+    assert "Capabilities quick intro" in str(intro_panel.renderable)
     assert getattr(commands_table, "title", "") == "Available Commands"
     assert len(commands_table.rows) >= 7
 
