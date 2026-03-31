@@ -154,6 +154,7 @@ Scriptable alignment **without** Streamlit. Uses `daily_data.csv`, `weekly_data.
 | `read_filtered_metadata(path)` | Load `filtered_series.csv` metadata |
 | `load_master_long(base_dir, ...)` | Combine long CSVs + optional metadata |
 | `build_aligned_panel(master_long, target_freq, ...)` | Wide panel: rows = dates at target **D** / **W** / **M** / **Q**; `reducer` `last`/`mean`/`sum`; `upsample_method` `ffill`/`linear`; optional `start`/`end`/`series_ids` |
+| `transform_master_timeframe(master_long, target_freq, ...)` | Convert mixed-frequency master data to one timeframe; can evenly distribute weekly/monthly/quarterly totals across days for daily targets, roll up to W/M/Q, and return modeling-optimized long/wide output |
 | `wide_to_long(wide)` | Stack wide → long |
 | `write_aligned_master_csv(wide, path, long_format=False)` | Write aligned CSV |
 | `correlation_matrix(wide, min_periods=2)` | Pearson correlation matrix |
@@ -161,10 +162,21 @@ Scriptable alignment **without** Streamlit. Uses `daily_data.csv`, `weekly_data.
 Example:
 
 ```python
-from panel import load_master_long, build_aligned_panel, write_aligned_master_csv
+from panel import (
+    load_master_long,
+    transform_master_timeframe,
+    write_aligned_master_csv,
+)
 
 master = load_master_long(".")
-wide = build_aligned_panel(master, "M", reducer="last", upsample_method="ffill")
+wide = transform_master_timeframe(
+    master,
+    target_freq="M",
+    reducer="sum",
+    optimize_for_modeling=True,
+    as_wide=True,
+    fill_method="ffill",
+)
 write_aligned_master_csv(wide, "aligned_master.csv")
 ```
 
