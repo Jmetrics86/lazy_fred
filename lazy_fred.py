@@ -92,10 +92,10 @@ def render_cli_commands_table():
 def show_cli_intro():
     console.print(
         Panel(
-            "[bold]CAPE quick intro[/bold]\n"
-            "CAPE (Cyclically Adjusted Price-to-Earnings, also called Shiller P/E) compares\n"
-            "today's market price level to roughly 10 years of inflation-adjusted earnings.\n"
-            "It is commonly used as a long-cycle valuation context signal, not as a short-term timer.",
+            "[bold]Capabilities quick intro[/bold]\n"
+            "lazy_fred helps you pull and organize FRED economic time series from the command line.\n"
+            "Use it to run guided category-based pulls, quick preset profiles, full dataset runs,\n"
+            "and diagnostics so you can validate your environment before collecting data.",
             title="Welcome to lazy_fred",
             border_style="magenta",
         )
