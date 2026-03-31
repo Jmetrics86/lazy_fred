@@ -99,6 +99,22 @@ lazy-fred-dashboard
 
 Requires the `[dashboard]` extra. From the directory that contains your CSVs, start the app and use the sidebar for paths, alignment options, and series selection.
 
+### Dashboard examples
+
+Below are example visuals showing the dashboard output style.
+
+#### Time series tab
+
+![Dashboard time series example](docs/images/dashboard-time-series-example.png)
+
+#### Correlation tab
+
+![Dashboard correlation heatmap example](docs/images/dashboard-correlation-example.png)
+
+#### Scatter tab (with OLS fit)
+
+![Dashboard scatter with OLS fit example](docs/images/dashboard-scatter-example.png)
+
 **Sidebar**
 
 - Working directory (where `daily_data.csv` / `weekly_data.csv` / `monthly_data.csv` live)
