@@ -279,6 +279,36 @@ def test_execute_collection_writes_pull_failures_aggregate(tmp_path, monkeypatch
     assert fails.iloc[0]["phase"] == "monthly"
 
 
+def test_backup_existing_outputs_falls_back_when_copy2_permission_denied(
+    tmp_path, monkeypatch
+):
+    lf = _lf()
+    monkeypatch.chdir(tmp_path)
+
+    # Create one existing output to trigger backup behavior.
+    (tmp_path / "filtered_series.csv").write_text("id\nX\n", encoding="utf-8")
+
+    copied = []
+
+    def fake_copy2(src, dst):
+        raise PermissionError("xattr copy not permitted")
+
+    def fake_copyfile(src, dst):
+        copied.append((src, dst))
+        return str(dst)
+
+    monkeypatch.setattr(lf.shutil, "copy2", fake_copy2)
+    monkeypatch.setattr(lf.shutil, "copyfile", fake_copyfile)
+    monkeypatch.setattr(lf.console, "print", lambda *a, **k: None)
+
+    lf.backup_existing_outputs()
+
+    assert len(copied) == 1
+    assert copied[0][0] == "filtered_series.csv"
+    assert copied[0][1].startswith(os.path.join("backups", ""))
+    assert copied[0][1].endswith("filtered_series.csv")
+
+
 def test_build_master_dataset_builds_enriched_long_csv(tmp_path):
     lf = _lf()
 

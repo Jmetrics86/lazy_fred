@@ -7,6 +7,7 @@ import datetime
 import os
 import sys
 import shutil
+import errno
 from dotenv import load_dotenv, set_key
 import json
 from rich.console import Console
@@ -731,7 +732,27 @@ def backup_existing_outputs():
     backup_dir = os.path.join("backups", timestamp)
     os.makedirs(backup_dir, exist_ok=True)
     for filename in existing:
-        shutil.copy2(filename, os.path.join(backup_dir, filename))
+        dst = os.path.join(backup_dir, filename)
+        try:
+            shutil.copy2(filename, dst)
+        except (PermissionError, OSError) as exc:
+            # Some filesystems disallow metadata/xattr copy during ``copy2``.
+            # Fall back to plain content copy so backup never blocks a run.
+            err_no = getattr(exc, "errno", None)
+            msg = str(exc).lower()
+            fallback_ok = isinstance(exc, PermissionError) or err_no in {
+                errno.EPERM,
+                errno.EACCES,
+                errno.ENOTSUP,
+                errno.EOPNOTSUPP,
+            } or "xattr" in msg
+            if not fallback_ok:
+                raise
+            shutil.copyfile(filename, dst)
+            console.print(
+                "[yellow]Backup note:[/yellow] metadata copy skipped for "
+                f"{filename} ({exc})"
+            )
     console.print(
         f"[yellow]Backed up existing output files to:[/yellow] {os.path.abspath(backup_dir)}"
     )
