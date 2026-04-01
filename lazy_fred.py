@@ -48,6 +48,113 @@ STARTER_MODES = {
 }
 
 
+def _ensure_env_file(path):
+    path = os.path.abspath(path)
+    env_dir = os.path.dirname(path)
+    if env_dir:
+        os.makedirs(env_dir, exist_ok=True)
+    if not os.path.exists(path):
+        with open(path, "a", encoding="utf-8"):
+            pass
+    return path
+
+
+def _shared_state_dir():
+    return os.path.join(os.path.expanduser("~"), ".lazy_fred")
+
+
+def _shared_env_path():
+    return os.path.join(_shared_state_dir(), ".env")
+
+
+def _load_api_key_sources():
+    # Shared user-level store first, then current working directory .env.
+    load_dotenv(_shared_env_path())
+    load_dotenv()
+
+
+def _current_api_key():
+    _load_api_key_sources()
+    for key_name in ("API_KEY", "FRED_API_KEY"):
+        key_val = (os.getenv(key_name) or "").strip()
+        if key_val:
+            return key_val
+    return None
+
+
+def persist_api_key(api_key):
+    """Persist API key for reuse across all lazy_fred entrypoints."""
+    key = (api_key or "").strip()
+    if not key:
+        return None
+
+    os.environ["API_KEY"] = key
+    os.environ["FRED_API_KEY"] = key
+
+    shared_env = _ensure_env_file(_shared_env_path())
+    set_key(shared_env, "API_KEY", key)
+
+    # Keep local .env in sync for backwards compatibility.
+    try:
+        local_env = _ensure_env_file(".env")
+        set_key(local_env, "API_KEY", key)
+    except Exception as exc:
+        logger.warning("Could not mirror API key into local .env: %s", exc)
+    return key
+
+
+def resolve_api_key(api_key=None, *, prompt_if_missing=False):
+    """Resolve API key from arg/env/shared store; optionally prompt."""
+    candidate = (api_key or "").strip()
+    if candidate:
+        os.environ["API_KEY"] = candidate
+        os.environ["FRED_API_KEY"] = candidate
+        return candidate
+
+    candidate = _current_api_key()
+    if candidate:
+        os.environ["API_KEY"] = candidate
+        os.environ["FRED_API_KEY"] = candidate
+        return candidate
+
+    if prompt_if_missing:
+        entered = Prompt.ask(
+            "API_KEY not found. Please enter your API key "
+            "(saved locally for future runs)"
+        ).strip()
+        if entered:
+            os.environ["API_KEY"] = entered
+            os.environ["FRED_API_KEY"] = entered
+            return entered
+    return None
+
+
+def get_stored_api_key():
+    """Public helper to read the best available stored API key."""
+    return _current_api_key()
+
+
+def ensure_api_key(api_key=None, *, prompt=False):
+    """
+    Public helper for entrypoints that need a resolved API key.
+
+    Resolves from arg/env/shared store, optionally prompting if missing.
+    """
+    resolved = resolve_api_key(api_key, prompt_if_missing=False)
+    if resolved:
+        return resolved
+    if not prompt:
+        return None
+    entered = Prompt.ask(
+        "API_KEY not found. Please enter your API key "
+        "(saved locally for future runs)"
+    ).strip()
+    if not entered:
+        return None
+    persist_api_key(entered)
+    return entered
+
+
 def render_categories_table(categories=None):
     categories = categories if categories is not None else search_categories
     table = Table(title="Current Search Categories")
@@ -760,7 +867,7 @@ def backup_existing_outputs():
 
 def run_doctor():
     """Basic environment checks for first-time users."""
-    load_dotenv()
+    _load_api_key_sources()
     table = Table(title="lazy_fred doctor")
     table.add_column("Check", style="cyan")
     table.add_column("Status")
@@ -773,7 +880,7 @@ def run_doctor():
         f"{sys.version.split()[0]} (needs >= 3.10)",
     )
 
-    key = os.getenv("API_KEY") or os.getenv("FRED_API_KEY")
+    key = _current_api_key()
     has_key = bool((key or "").strip())
     table.add_row(
         "FRED API key",
@@ -833,29 +940,29 @@ def reset_search_categories():
 
 class AccessFred:
     def set_api_key_in_environment(self):
-        try:
-            api_key = os.environ["API_KEY"]
-            print("API_KEY exists and has the value:", api_key)
-        except KeyError:
-            api_key = input("API_KEY not found in .env. Please enter your API key: ")
-            set_key(".env", "API_KEY", api_key)
+        api_key = resolve_api_key(prompt_if_missing=True)
+        if not api_key:
+            raise ValueError("API key is required.")
+        return api_key
             
     def get_and_validate_api_key(self):
-        """Retrieves API key, stores in .env if valid, and handles errors."""
-        load_dotenv() 
-        api_key = os.getenv("API_KEY")
-        fredapi = Fred(api_key=api_key)
-
-        while not api_key:  
-            api_key = input("API_KEY not found in .env. Please enter your API key: ")
-
+        """Retrieve and validate an API key, then persist for future runs."""
+        api_key = resolve_api_key()
+        while True:
+            if not api_key:
+                api_key = input("API key not found. Please enter your API key: ").strip()
+            if not api_key:
+                continue
             try:
-                fredapi.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
+                Fred(api_key=api_key).search(
+                    "category", order_by="popularity", sort_order="desc", limit=searchlimit
+                )
                 logger.info("API key is valid!")
-                set_key(".env", "API_KEY", api_key) 
+                persist_api_key(api_key)
                 return api_key
             except Exception:
                 logger.error("Invalid API key. Please try again.")
+                api_key = None
 
 class CollectCategories:
     def __init__(self, api_key):
@@ -1037,24 +1144,17 @@ class weekly_export:
 
 def run_fred_data_collection(api_key, categories=None, interactive=True, observation_start=None):
     console.print(Panel("Welcome to [bold]lazy_fred[/bold]\nLet's collect FRED data.", title="Starting collection process"))
-    load_dotenv()
-    # Resolve API key from function arg, then environment, then prompt.
-    if not api_key:
-        api_key = os.getenv("API_KEY")
-    if not api_key:
-        api_key = Prompt.ask("API_KEY not found in environment. Please enter your API key").strip()
+    api_key = resolve_api_key(api_key, prompt_if_missing=True)
     if not api_key:
         logger.error("No API key provided. Exiting.")
         return
-
-    os.environ["API_KEY"] = api_key
-    set_key(".env", "API_KEY", api_key)
 
     try:
         fred_client = Fred(api_key=api_key)
         fred_client.search('category', order_by='popularity', sort_order='desc', limit=searchlimit)
         logger.info("API key is valid!")
         console.print("[green]API key validated.[/green]")
+        persist_api_key(api_key)
     except Exception:
         logger.error("Invalid API key provided. Please check and try again.")
         console.print("[red]Invalid API key provided. Please check and try again.[/red]")
@@ -1092,9 +1192,6 @@ def run_fred_data_collection(api_key, categories=None, interactive=True, observa
             action = "run-all"
         elif action == "quit":
             action = "q"
-
-        os.environ["API_KEY"] = api_key
-        set_key(".env", "API_KEY", api_key)
 
         if action == 'a':
             category = Prompt.ask("Enter category to add").strip()
@@ -1195,7 +1292,7 @@ def launch_notebook_ui(api_key=None):
         )
 
     if not api_key:
-        api_key = os.getenv("API_KEY")
+        api_key = resolve_api_key()
 
     api_key_input = widgets.Password(
         value=api_key or "",

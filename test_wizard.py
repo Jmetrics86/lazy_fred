@@ -219,6 +219,22 @@ class TestKitchenSinkCategories:
         assert len(KITCHEN_SINK_CATEGORIES) == len(set(KITCHEN_SINK_CATEGORIES))
 
 
+class TestApiKeyPersistence:
+    def test_step_api_key_uses_shared_stored_key(self, monkeypatch):
+        import wizard as wz
+
+        monkeypatch.setattr(wz, "get_stored_api_key", lambda: "wizard-shared-key")
+        monkeypatch.setattr(wz.console, "print", lambda *a, **k: None)
+        monkeypatch.setattr(
+            wz.inquirer,
+            "confirm",
+            lambda **kwargs: type("X", (), {"execute": lambda self: True})(),
+        )
+
+        key = wz.step_api_key()
+        assert key == "wizard-shared-key"
+
+
 # ── _fetch_one_series (pandas timestamp handling) ─────────────────────────────
 
 class TestFetchOneSeriesTimestamp:

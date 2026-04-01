@@ -19,8 +19,6 @@ import threading
 
 import pandas as pd
 from fredapi import Fred
-from dotenv import load_dotenv, set_key
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -35,6 +33,7 @@ from InquirerPy import inquirer
 from InquirerPy.separator import Separator
 
 from data_store import DataStore, save_config, list_configs, load_config
+from lazy_fred import ensure_api_key, get_stored_api_key, persist_api_key
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -283,8 +282,7 @@ def step_api_key() -> str:
         border_style="bright_blue", box=box.ROUNDED,
     ))
 
-    load_dotenv()
-    existing = os.getenv("API_KEY")
+    existing = get_stored_api_key()
 
     if existing:
         masked = existing[:6] + "•" * 20 + existing[-4:]
@@ -321,7 +319,7 @@ def step_api_key() -> str:
                 continue
 
         console.print("  [green]Key is valid![/green]")
-        set_key(".env", "API_KEY", key)
+        persist_api_key(key)
         return key
 
 
@@ -477,8 +475,11 @@ def _keyword_search(fred_client: Fred) -> list[str]:
         validate=lambda val: len(val.strip()) > 0,
     ).execute()
 
-    load_dotenv()
-    fred_lib.key(os.getenv("API_KEY"))
+    key = get_stored_api_key()
+    if not key:
+        console.print("  [red]API key missing. Please restart wizard and set a key.[/red]")
+        return _browse_popular()
+    fred_lib.key(key)
 
     with console.status(f"[bold cyan]Searching FRED for '{keyword}'…[/]"):
         try:
@@ -580,8 +581,11 @@ def _kitchen_sink(fred_client: Fred) -> list[str]:
     ).execute()
 
     console.print()
-    load_dotenv()
-    fred_lib.key(os.getenv("API_KEY"))
+    key = get_stored_api_key()
+    if not key:
+        console.print("  [red]API key missing. Please restart wizard and set a key.[/red]")
+        return []
+    fred_lib.key(key)
 
     all_series: dict[str, dict] = {}
     n_cats = len(KITCHEN_SINK_CATEGORIES)
@@ -1247,7 +1251,9 @@ def _ask_save_config(series_ids: list[str], start_date: str | None,
 def main():
     show_welcome()
 
-    api_key = step_api_key()
+    api_key = ensure_api_key(prompt=True)
+    if not api_key:
+        api_key = step_api_key()
     fred_client = Fred(api_key=api_key)
 
     series_ids, mode = step_choose_series(fred_client)
