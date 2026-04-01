@@ -1,5 +1,8 @@
 import importlib
+import importlib.util
 import os
+import pathlib
+import sys
 import tempfile
 import pandas as pd
 import pytest
@@ -463,4 +466,34 @@ def test_ensure_api_key_prompts_and_persists(monkeypatch):
 
     assert key == "prompt-key-789"
     assert captured["persisted"] == "prompt-key-789"
+
+
+def test_package_init_exports_api_key_helpers():
+    """
+    Regression test for package-level exports.
+
+    CI imports ``wizard.py`` through the package entrypoint, so __init__.py
+    must re-export these helpers from lazy_fred.py.
+    """
+    root = pathlib.Path(__file__).resolve().parent
+    spec = importlib.util.spec_from_file_location(
+        "lazy_fred_pkg_test",
+        root / "__init__.py",
+        submodule_search_locations=[str(root)],
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["lazy_fred_pkg_test"] = module
+    spec.loader.exec_module(module)
+    try:
+        for name in (
+            "resolve_api_key",
+            "ensure_api_key",
+            "get_stored_api_key",
+            "persist_api_key",
+        ):
+            assert name in module.__all__
+            assert hasattr(module, name)
+    finally:
+        sys.modules.pop("lazy_fred_pkg_test", None)
 

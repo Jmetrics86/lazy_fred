@@ -2,6 +2,21 @@
 
 Simple FRED data pulls for first-time Python users, plus optional alignment, charts, and a guided wizard.
 
+## Quick navigation
+
+- [Beginner](#beginner)
+- [Intermediate](#intermediate)
+  - [Main CLI (`lazy-fred`)](#lazy-fred-main-cli)
+  - [Wizard (`lazy-fred-wizard`)](#lazy-fred-wizard)
+  - [Dashboard (`lazy-fred-dashboard`)](#lazy-fred-dashboard)
+  - [Python API (`import lazy_fred`)](#python-api-import-lazy_fred)
+  - [Panel module](#panel-module-aligned-master-data)
+  - [Output files](#output-files)
+  - [Troubleshooting](#troubleshooting)
+- [Developer quickstart](#developer-quickstart)
+- [Advanced](#advanced)
+- [License](#license)
+
 ## Beginner
 
 **You need**
@@ -216,6 +231,33 @@ write_aligned_master_csv(wide, "aligned_master.csv")
 - **Colab function missing** — Install latest from GitHub (see Advanced) and restart runtime
 - **Run seems slow** — Expected for large pulls under FRED quotas; try `quick` or a `favorites` profile first
 - **Dashboard import error** — Install with the `[dashboard]` extra
+
+---
+
+## Developer quickstart
+
+For contributors or teams integrating `lazy_fred` into CI:
+
+```bash
+poetry install --with dev
+poetry run python -m ruff check .
+poetry run pytest -q
+```
+
+Live FRED integration tests are optional and require an API key:
+
+```bash
+export API_KEY="your_fred_key"
+poetry run pytest -q
+```
+
+Recommended smoke checks for CLI usability:
+
+```bash
+poetry run lazy-fred doctor
+poetry run lazy-fred --help
+poetry run lazy-fred quick
+```
 
 ---
 

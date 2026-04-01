@@ -460,13 +460,17 @@ def parse_start_date(value):
 
 
 def prompt_start_date():
-    raw = Prompt.ask(
-        "Start date filter (YYYY-MM-DD, leave blank for full history)",
-        default="",
-    ).strip()
-    if not raw:
-        return None
-    return parse_start_date(raw)
+    while True:
+        raw = Prompt.ask(
+            "Start date filter (YYYY-MM-DD, leave blank for full history)",
+            default="",
+        ).strip()
+        if not raw:
+            return None
+        try:
+            return parse_start_date(raw)
+        except ValueError:
+            console.print("[yellow]Invalid date. Use YYYY-MM-DD (example: 2010-01-01).[/yellow]")
 
 
 def parse_master_cli_args(args):
@@ -1249,14 +1253,28 @@ def main():
         return
 
     cmd = args[0].lower()
-    if cmd == "doctor":
+    if cmd in {"-h", "--help", "help"}:
+        show_cli_intro()
+    elif cmd == "doctor":
         run_doctor()
     elif cmd in STARTER_MODES:
-        run_starter_mode(os.getenv("API_KEY"), cmd)
+        try:
+            run_starter_mode(os.getenv("API_KEY"), cmd)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
     elif cmd == "favorites":
         profile = args[1] if len(args) > 1 else "macro"
-        run_favorites(os.getenv("API_KEY"), profile)
+        try:
+            run_favorites(os.getenv("API_KEY"), profile)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
     elif cmd == "master":
+        if len(args) > 1 and args[1].lower() in {"-h", "--help", "help"}:
+            console.print(
+                "Usage: [cyan]lazy-fred master[/cyan] "
+                "[cyan][--start YYYY-MM-DD][/cyan] [cyan][--out master_data.csv][/cyan]"
+            )
+            return
         try:
             observation_start, output_path = parse_master_cli_args(args[1:])
         except ValueError as exc:
