@@ -279,6 +279,36 @@ def test_execute_collection_writes_pull_failures_aggregate(tmp_path, monkeypatch
     assert fails.iloc[0]["phase"] == "monthly"
 
 
+def test_backup_existing_outputs_falls_back_when_copy2_permission_denied(
+    tmp_path, monkeypatch
+):
+    lf = _lf()
+    monkeypatch.chdir(tmp_path)
+
+    # Create one existing output to trigger backup behavior.
+    (tmp_path / "filtered_series.csv").write_text("id\nX\n", encoding="utf-8")
+
+    copied = []
+
+    def fake_copy2(src, dst):
+        raise PermissionError("xattr copy not permitted")
+
+    def fake_copyfile(src, dst):
+        copied.append((src, dst))
+        return str(dst)
+
+    monkeypatch.setattr(lf.shutil, "copy2", fake_copy2)
+    monkeypatch.setattr(lf.shutil, "copyfile", fake_copyfile)
+    monkeypatch.setattr(lf.console, "print", lambda *a, **k: None)
+
+    lf.backup_existing_outputs()
+
+    assert len(copied) == 1
+    assert copied[0][0] == "filtered_series.csv"
+    assert copied[0][1].startswith(os.path.join("backups", ""))
+    assert copied[0][1].endswith("filtered_series.csv")
+
+
 def test_build_master_dataset_builds_enriched_long_csv(tmp_path):
     lf = _lf()
 
@@ -379,4 +409,58 @@ def test_main_without_args_shows_intro_then_runs_collection(monkeypatch):
     lf.main()
 
     assert calls == [("intro", None), ("run", "env-key")]
+
+
+def test_persist_api_key_writes_shared_and_local_env(tmp_path, monkeypatch):
+    lf = _lf()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lf, "_shared_env_path", lambda: str(tmp_path / ".lazy_fred" / ".env"))
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+
+    lf.persist_api_key("persist-key-123")
+
+    assert os.getenv("API_KEY") == "persist-key-123"
+    assert os.getenv("FRED_API_KEY") == "persist-key-123"
+    global_env = tmp_path / ".lazy_fred" / ".env"
+    assert global_env.is_file()
+    text = global_env.read_text()
+    assert "API_KEY='persist-key-123'" in text or 'API_KEY="persist-key-123"' in text
+
+    local_text = (tmp_path / ".env").read_text()
+    assert "API_KEY='persist-key-123'" in local_text or 'API_KEY="persist-key-123"' in local_text
+
+
+def test_resolve_api_key_uses_global_lazy_fred_env(tmp_path, monkeypatch):
+    lf = _lf()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    monkeypatch.setattr(lf, "_shared_env_path", lambda: str(tmp_path / ".lazy_fred" / ".env"))
+    (tmp_path / ".lazy_fred").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".lazy_fred" / ".env").write_text("API_KEY=from-global-env\n")
+    monkeypatch.setattr(lf.Prompt, "ask", lambda *a, **k: "")
+
+    key = lf.resolve_api_key()
+
+    assert key == "from-global-env"
+
+
+def test_ensure_api_key_prompts_and_persists(monkeypatch):
+    lf = _lf()
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    captured = {"persisted": None}
+    monkeypatch.setattr(
+        lf,
+        "resolve_api_key",
+        lambda api_key=None, prompt_if_missing=False: "prompt-key-789" if prompt_if_missing else None,
+    )
+    monkeypatch.setattr(lf.Prompt, "ask", lambda *a, **k: "prompt-key-789")
+    monkeypatch.setattr(lf, "persist_api_key", lambda key: captured.__setitem__("persisted", key))
+
+    key = lf.ensure_api_key(prompt=True)
+
+    assert key == "prompt-key-789"
+    assert captured["persisted"] == "prompt-key-789"
 
