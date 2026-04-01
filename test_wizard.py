@@ -13,6 +13,7 @@ from wizard import (
     _is_date_after_1900,
     _RateLimiter,
     _fetch_one_series,
+    _series_dicts_from_search_result,
     ErrorLog,
     POPULAR_SERIES,
     KITCHEN_SINK_CATEGORIES,
@@ -217,6 +218,47 @@ class TestKitchenSinkCategories:
 
     def test_no_duplicates(self):
         assert len(KITCHEN_SINK_CATEGORIES) == len(set(KITCHEN_SINK_CATEGORIES))
+
+
+class TestSeriesDictsFromSearchResult:
+    """Keyword search normalizes fredapi DataFrame and legacy dict responses."""
+
+    def test_empty_dataframe(self):
+        assert _series_dicts_from_search_result(pd.DataFrame()) == []
+
+    def test_fredapi_style_dataframe(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "id": "GDP",
+                    "title": "Gross Domestic Product",
+                    "frequency_short": "Q",
+                    "popularity": 99,
+                },
+                {
+                    "id": "GDPC1",
+                    "title": "Real GDP",
+                    "frequency_short": "Q",
+                    "popularity": 88,
+                },
+            ]
+        )
+        rows = _series_dicts_from_search_result(df)
+        assert len(rows) == 2
+        assert rows[0]["id"] == "GDP"
+        assert rows[0]["popularity"] == 99
+        assert rows[1]["frequency_short"] == "Q"
+
+    def test_legacy_dict_seriess(self):
+        raw = {
+            "seriess": [
+                {"id": "UNRATE", "title": "Unemployment", "frequency_short": "M", "popularity": "90"},
+            ]
+        }
+        rows = _series_dicts_from_search_result(raw)
+        assert len(rows) == 1
+        assert rows[0]["id"] == "UNRATE"
+        assert rows[0]["popularity"] == 90
 
 
 class TestApiKeyPersistence:

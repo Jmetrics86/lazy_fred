@@ -91,6 +91,84 @@ def _fred_call(fn, *args, retries: int = 4, **kwargs):
             raise
 
 
+def _series_dicts_from_search_result(raw) -> list[dict]:
+    """
+    Normalize FRED series search output to a list of dicts with id, title,
+    frequency_short, and popularity.
+
+    fredapi.Fred.search returns a DataFrame; the legacy ``fred`` package returns
+    a dict with a ``seriess`` list. Both shapes are accepted.
+    """
+    if raw is None:
+        return []
+
+    if isinstance(raw, pd.DataFrame):
+        if raw.empty:
+            return []
+        df = raw
+        if "id" not in df.columns:
+            df = raw.reset_index()
+            idx_name = df.columns[0]
+            if idx_name != "id":
+                df = df.rename(columns={idx_name: "id"})
+        out: list[dict] = []
+        for _, row in df.iterrows():
+            sid = row.get("id")
+            if sid is None or (isinstance(sid, float) and pd.isna(sid)):
+                continue
+            sid = str(sid).strip()
+            if not sid:
+                continue
+            pop = row.get("popularity", 0)
+            try:
+                pop_i = int(pop)
+            except (TypeError, ValueError):
+                try:
+                    pop_i = int(float(pop))
+                except (TypeError, ValueError):
+                    pop_i = 0
+            title = row.get("title", "") or ""
+            freq = row.get("frequency_short", "") or "?"
+            out.append(
+                {
+                    "id": sid,
+                    "title": str(title),
+                    "frequency_short": str(freq),
+                    "popularity": pop_i,
+                }
+            )
+        return out
+
+    if isinstance(raw, dict):
+        rows = raw.get("seriess")
+        if rows is None:
+            rows = raw.get("series")
+        if not isinstance(rows, list):
+            return []
+        normalized: list[dict] = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            sid = (item.get("id") or "").strip()
+            if not sid:
+                continue
+            try:
+                pop_i = int(item.get("popularity", 0))
+            except (TypeError, ValueError):
+                pop_i = 0
+            normalized.append(
+                {
+                    "id": sid,
+                    "title": str(item.get("title", "") or ""),
+                    "frequency_short": str(item.get("frequency_short", "") or "?"),
+                    "popularity": pop_i,
+                }
+            )
+        return normalized
+
+    return []
+
+
 # ── Error log ─────────────────────────────────────────────────────────────────
 
 class ErrorLog:
@@ -468,23 +546,22 @@ def _manual_entry(fred_client: Fred) -> list[str]:
 
 
 def _keyword_search(fred_client: Fred) -> list[str]:
-    import fred as fred_lib
-
     keyword = inquirer.text(
         message="Search keyword (e.g. 'inflation', 'housing'):",
         validate=lambda val: len(val.strip()) > 0,
     ).execute()
-
-    key = get_stored_api_key()
-    if not key:
-        console.print("  [red]API key missing. Please restart wizard and set a key.[/red]")
-        return _browse_popular()
-    fred_lib.key(key)
+    keyword = (keyword or "").strip()
 
     with console.status(f"[bold cyan]Searching FRED for '{keyword}'…[/]"):
         try:
-            raw_results = fred_lib.search(keyword)
-            series_list = raw_results.get("seriess", [])
+            raw_results = _fred_call(
+                fred_client.search,
+                keyword,
+                limit=100,
+                order_by="popularity",
+                sort_order="desc",
+            )
+            series_list = _series_dicts_from_search_result(raw_results)
         except Exception as exc:
             console.print(f"  [red]Search failed: {exc}[/red]")
             console.print("  [yellow]Falling back to popular series.[/yellow]")
